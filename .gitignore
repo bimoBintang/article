@@ -39,3 +39,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# screenshot lokal (jangan di-commit)
+Screenshot *.png
+
+# konfigurasi lokal alat bantu (berisi API key)
+opencode.json
