@@ -8,8 +8,7 @@ import {
   X,
   ZoomIn,
   ZoomOut,
-  Maximize2,
-  Minimize2,
+  ExternalLink,
 } from "lucide-react";
 
 export type PreviewImage = {
@@ -36,6 +35,7 @@ export function TablePreview({
   title,
   subtitle,
   meta = [],
+  startIndex = 0,
 }: {
   open: boolean;
   onClose: () => void;
@@ -43,6 +43,8 @@ export function TablePreview({
   title?: string;
   subtitle?: string;
   meta?: PreviewMeta[];
+  /** Gambar yang tampil pertama saat dibuka (mis. gambar yang diklik). */
+  startIndex?: number;
 }) {
   const [index, setIndex] = useState(0);
   const [zoomed, setZoomed] = useState(false);
@@ -61,10 +63,10 @@ export function TablePreview({
   // Reset saat dibuka
   useEffect(() => {
     if (open) {
-      setIndex(0);
+      setIndex(Math.min(Math.max(startIndex, 0), Math.max(count - 1, 0)));
       setZoomed(false);
     }
-  }, [open]);
+  }, [open, startIndex, count]);
 
   // Keyboard + scroll lock
   useEffect(() => {
@@ -125,6 +127,18 @@ export function TablePreview({
             </span>
           )}
           {hasImages && (
+            <a
+              href={active!.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="Buka gambar asli di tab baru"
+              title="Buka gambar asli"
+              className="flex h-9 w-9 items-center justify-center rounded-full bg-white/10 transition-colors hover:bg-white/20"
+            >
+              <ExternalLink className="h-4 w-4" />
+            </a>
+          )}
+          {hasImages && (
             <button
               type="button"
               onClick={() => setZoomed((z) => !z)}
@@ -152,19 +166,25 @@ export function TablePreview({
       {/* Konten */}
       {hasImages ? (
         <>
-          <div className="relative flex min-h-0 flex-1 items-center justify-center px-4 pb-4">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              key={active!.url}
-              src={active!.url}
-              alt={active!.alt || title || ""}
-              className={
-                zoomed
-                  ? "max-h-full max-w-full cursor-zoom-out object-contain transition-transform"
-                  : "max-h-full max-w-full cursor-zoom-in object-contain transition-transform"
-              }
-              style={zoomed ? { transform: "scale(1.8)" } : undefined}
-            />
+          <div className="relative flex min-h-0 flex-1 px-4 pb-4">
+            {/* Diperbesar: gambar tampil pada ukuran aslinya dan bisa digulir untuk melihat detail */}
+            <div
+              data-preview-scroll
+              className="flex min-h-0 flex-1 overflow-auto"
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                key={active!.url}
+                src={active!.url}
+                alt={active!.alt || title || ""}
+                onClick={() => setZoomed((z) => !z)}
+                className={
+                  zoomed
+                    ? "m-auto max-h-none max-w-none cursor-zoom-out"
+                    : "m-auto max-h-full max-w-full cursor-zoom-in object-contain"
+                }
+              />
+            </div>
 
             {count > 1 && (
               <>

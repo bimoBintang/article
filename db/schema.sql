@@ -84,7 +84,7 @@ CREATE TABLE IF NOT EXISTS packages (
   description TEXT,
   base_price INTEGER NOT NULL,
   look_count INTEGER,
-  duration_minutes INTEGER,
+  duration_minutes INTEGER, -- tidak dipakai lagi (durasi dihapus dari tampilan dan API), kolom dibiarkan
   photo_count INTEGER,
   is_active BOOLEAN DEFAULT TRUE,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
@@ -109,6 +109,21 @@ CREATE TABLE IF NOT EXISTS requests (
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+-- Jenis permintaan: TEMPLATE (dari keranjang produk) atau CUSTOM (brief sendiri + referensi)
+ALTER TABLE requests ADD COLUMN IF NOT EXISTS request_type VARCHAR(20) NOT NULL DEFAULT 'TEMPLATE';
+ALTER TABLE requests ADD COLUMN IF NOT EXISTS custom_title VARCHAR(255);
+ALTER TABLE requests ADD COLUMN IF NOT EXISTS custom_description TEXT;
+
+-- Referensi permintaan CUSTOM: gambar yang diunggah atau tautan
+CREATE TABLE IF NOT EXISTS request_references (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  request_id UUID NOT NULL REFERENCES requests(id) ON DELETE CASCADE,
+  kind VARCHAR(10) NOT NULL, -- IMAGE | LINK
+  url TEXT NOT NULL,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_request_references_request ON request_references(request_id);
+
 -- Request line items
 CREATE TABLE IF NOT EXISTS request_items (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -119,8 +134,20 @@ CREATE TABLE IF NOT EXISTS request_items (
   quantity INTEGER NOT NULL DEFAULT 1,
   estimated_price INTEGER,
   notes TEXT,
+  -- Jenis model: male, male-female, female, male-male, female-female, mixed
+  model_gender VARCHAR(30),
+  model_notes TEXT,
+  -- Opsi paket "Sesuai kebutuhan" (package_id NULL): jumlah look dan foto dari client
+  custom_look_count INTEGER,
+  custom_photo_count INTEGER,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
+
+-- Kolom model dan paket kustom untuk database yang tabelnya sudah ada
+ALTER TABLE request_items ADD COLUMN IF NOT EXISTS model_gender VARCHAR(30);
+ALTER TABLE request_items ADD COLUMN IF NOT EXISTS model_notes TEXT;
+ALTER TABLE request_items ADD COLUMN IF NOT EXISTS custom_look_count INTEGER;
+ALTER TABLE request_items ADD COLUMN IF NOT EXISTS custom_photo_count INTEGER;
 
 -- Request status history
 CREATE TABLE IF NOT EXISTS request_status_logs (
@@ -177,8 +204,23 @@ CREATE TABLE IF NOT EXISTS settings (
 INSERT INTO settings (key, value) VALUES
   ('show_product_price', 'true'),
   ('show_package_price', 'true'),
-  ('show_additional_fee', 'true')
+  ('show_additional_fee', 'true'),
+  ('hero_visual_template', 'orbit-3d')
 ON CONFLICT (key) DO NOTHING;
+
+-- Testimoni pelanggan (kartu bergerak di beranda)
+CREATE TABLE IF NOT EXISTS testimonials (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  quote TEXT NOT NULL,
+  name VARCHAR(255) NOT NULL,
+  title VARCHAR(255),
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  is_published BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_testimonials_published ON testimonials(is_published, sort_order);
 
 -- Visitors (identitas perangkat)
 CREATE TABLE IF NOT EXISTS visitors (
@@ -233,20 +275,35 @@ CREATE INDEX IF NOT EXISTS idx_payment_events_invoice ON payment_events(invoice_
 CREATE INDEX IF NOT EXISTS idx_analytics_session ON analytics_events(session_id);
 CREATE INDEX IF NOT EXISTS idx_analytics_event ON analytics_events(event_name);
 
--- Seed default admin (email: admin@ekatalog.local, password: admin123)
--- CHANGE THIS IN PRODUCTION
-INSERT INTO admin_users (email, password_hash, role)
-VALUES (
-  'admin@ekatalog.local',
-  '$2b$12$PDFCg625VKeRqQUWA1uLeOlmtYyDxILxrA2KlcZz9ZWCz9rD6nW5y', -- bcrypt hash of "admin123"
-  'admin'
-)
-ON CONFLICT (email) DO NOTHING;
+-- Admin pertama dibuat dengan: node scripts/create-admin.mjs <email>
+-- (tidak ada akun bawaan; jangan menaruh kata sandi di berkas ini)
 
--- Seed sample packages
-INSERT INTO packages (name, description, base_price, look_count, duration_minutes, photo_count, is_active)
-VALUES
-  ('Basic', '1 look, 30 menit, 10 foto hasil edit', 500000, 1, 30, 10, true),
-  ('Standard', '3 look, 60 menit, 25 foto hasil edit', 1200000, 3, 60, 25, true),
-  ('Premium', '5 look, 120 menit, 50 foto hasil edit', 2500000, 5, 120, 50, true)
-ON CONFLICT DO NOTHING;
+-- Data contoh (testimoni dan paket) ada di db/seed-sample.sql dan HANYA untuk demo/pengembangan.
+
+-- Kalender jadwal di dashboard mengelompokkan permintaan per tanggal pemotretan
+CREATE INDEX IF NOT EXISTS idx_requests_preferred_date ON requests(preferred_date);
+
+-- Invoice untuk pembayaran Midtrans Core API.
+-- Tiap percobaan charge memakai order_id baru "<invoice_number>-<attempt>";
+-- order_id selalu menunjuk percobaan terbaru, riwayat ada di payment_events.
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS invoice_number VARCHAR(50);
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS pay_token VARCHAR(255);
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS attempt INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS payment_method VARCHAR(30);
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS payment_details JSONB;
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS transaction_id VARCHAR(100);
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS description TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_invoices_pay_token ON invoices(pay_token);
+
+-- Data pribadi pelanggan disimpan terenkripsi ("pii:v1:..."), jauh lebih panjang dari data aslinya
+ALTER TABLE requests ALTER COLUMN customer_name TYPE TEXT;
+ALTER TABLE requests ALTER COLUMN customer_email TYPE TEXT;
+ALTER TABLE requests ALTER COLUMN customer_whatsapp TYPE TEXT;
+
+-- Pembatas laju bersama (tahan restart dan banyak instance); lihat lib/rate-limit.ts
+CREATE TABLE IF NOT EXISTS rate_limits (
+  key VARCHAR(200) PRIMARY KEY,
+  count INTEGER NOT NULL DEFAULT 1,
+  window_start TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_rate_limits_window ON rate_limits(window_start);

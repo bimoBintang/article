@@ -60,16 +60,19 @@ export async function proxy(request: NextRequest, event: NextFetchEvent) {
       httpOnly: true,
       sameSite: "lax",
       secure: process.env.NODE_ENV === "production",
-      maxAge: 60 * 60 * 24 * 365, // berlaku 1 tahun
+      maxAge: 60 * 60 * 24 * 180, // berlaku 180 hari
       path: "/",
     });
   }
 
   // Hanya lacak halaman (bukan request API / asset)
+  // /bayar memuat token rahasia di path-nya dan /login tidak berguna untuk analitik
   const isTrackable =
     !pathname.startsWith("/api") &&
     !pathname.startsWith("/_next") &&
-    !pathname.startsWith("/admin");
+    !pathname.startsWith("/admin") &&
+    !pathname.startsWith("/bayar") &&
+    !pathname.startsWith("/login");
 
   if (isTrackable) {
     const ipAddress = getClientIp(request.headers);

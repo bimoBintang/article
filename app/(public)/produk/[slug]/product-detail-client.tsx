@@ -1,16 +1,32 @@
 "use client";
 
-import Image from "next/image";
 import Link from "next/link";
 import dynamic from "next/dynamic";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { FlyToCartLayer, flyToCart } from "@/components/cart/fly-to-cart";
 import { ShoppingCart, Plus, Minus, Box, Images, Check } from "lucide-react";
-import type { Product, Talent, Package, ProductImage } from "@/types";
+import type { CartItem, Product, Package, ProductImage } from "@/types";
 import type { PublicSettings } from "@/lib/settings";
 import { displayPrice } from "@/lib/price";
 import { Breadcrumb } from "@/components/seo/breadcrumb";
 import { ProductGallery } from "./product-gallery";
-import { ImagePlaceholder } from "@/components/ui/image-placeholder";
+import {
+  EMPTY_MODEL_SELECTION,
+  ModelPicker,
+  type ModelSelection,
+} from "@/components/request/model-picker";
+import {
+  EMPTY_PACKAGE_SELECTION,
+  PackagePicker,
+  resolvePackageSelection,
+  type PackageSelection,
+} from "@/components/request/package-picker";
+
+/** Nomor WhatsApp admin (format 628xxxx). Tanpa nilai ini kartu "Butuh Bantuan" disembunyikan, bukan diarahkan ke nomor contoh. */
+const WHATSAPP_NUMBER = (() => {
+  const digits = process.env.NEXT_PUBLIC_WHATSAPP_NUMBER?.replace(/\D/g, "") ?? "";
+  return digits === "6281234567890" ? "" : digits; // nomor contoh dari .env.example dianggap belum diisi
+})();
 
 const Viewer3D = dynamic(
  () => import("@/components/viewer3d").then((mod) => mod.Viewer3D),
@@ -33,22 +49,25 @@ type ModelAsset = {
 export default function ProductDetailClient({
  product,
  modelAsset,
- talents,
  packages,
  images,
  settings,
 }: {
  product: Product;
  modelAsset: ModelAsset;
- talents: Talent[];
  packages: Package[];
  images: ProductImage[];
  settings: PublicSettings;
 }) {
- const [selectedTalent, setSelectedTalent] = useState<string | null>(null);
- const [selectedPackage, setSelectedPackage] = useState<string | null>(null);
+ const [pkgSel, setPkgSel] = useState<PackageSelection>(EMPTY_PACKAGE_SELECTION);
+ const [model, setModel] = useState<ModelSelection>(EMPTY_MODEL_SELECTION);
+ const [formError, setFormError] = useState("");
+ const errorRef = useRef<HTMLParagraphElement>(null);
  const [quantity, setQuantity] = useState(1);
- const [inCart, setInCart] = useState(false);
+ // true selama 1,6 detik setelah menambah ke keranjang (umpan balik tombol)
+ const [added, setAdded] = useState(false);
+ const addedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+ useEffect(() => () => { if (addedTimer.current) clearTimeout(addedTimer.current); }, []);
 
  const hasModel3d = Boolean(modelAsset?.file_url);
  const hasGallery = images.length > 0;
@@ -56,28 +75,51 @@ export default function ProductDetailClient({
  hasModel3d ? "3d" : "gallery"
  );
 
- function addToCart() {
- if (!selectedPackage) {
- alert("Silakan pilih paket terlebih dahulu.");
+ // Pesan kesalahan muncul di kartu opsi; di layar kecil tombol keranjang ada di
+ // bar bawah, jadi gulirkan pesannya ke tengah layar supaya terlihat.
+ useEffect(() => {
+ if (formError) {
+ errorRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+ }
+ }, [formError]);
+
+ function addToCart(trigger: HTMLElement) {
+ setFormError("");
+ const resolved = resolvePackageSelection(pkgSel);
+ if (!resolved.ok) {
+ setFormError(resolved.error);
  return;
  }
- const cartItem = {
+
+ const cartItem: CartItem = {
  productId: product.id,
- packageId: selectedPackage,
- talentId: selectedTalent,
+ packageId: resolved.packageId,
+ customLookCount: resolved.customLookCount,
+ customPhotoCount: resolved.customPhotoCount,
+ modelGender: model.gender,
+ modelNotes: model.notes.trim() || null,
  quantity,
  };
  const existing = localStorage.getItem("ekatalog_cart");
  const cart = existing ? JSON.parse(existing) : [];
  cart.push(cartItem);
  localStorage.setItem("ekatalog_cart", JSON.stringify(cart));
- setInCart(true);
- setTimeout(() => setInCart(false), 2000);
+ // Foto produk terbang ke header; jumlah keranjang berubah saat foto tiba.
+ // Tanpa animasi (mengurangi gerak dsb.), perbarui jumlah di header langsung.
+ const flying = flyToCart(
+ trigger,
+ product.thumbnail_url ?? images[0]?.image_url ?? null
+ );
+ if (!flying) window.dispatchEvent(new Event("ekatalog:cart-change"));
+ setAdded(true);
+ if (addedTimer.current) clearTimeout(addedTimer.current);
+ addedTimer.current = setTimeout(() => setAdded(false), 1600);
  }
 
  return (
  <div className="min-h-screen">
- <div className="mx-auto max-w-7xl px-4 pb-28 pt-8 lg:pb-8">
+ <FlyToCartLayer />
+ <div className="mx-auto max-w-7xl px-4 py-8">
  <Breadcrumb
  items={[
  { name: "Beranda", path: "/" },
@@ -173,95 +215,20 @@ export default function ProductDetailClient({
  <div className="rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
  <h3 className="mb-6 text-lg font-bold text-foreground">Pilih Opsi</h3>
 
- {/* Model / Talent */}
- <div className="space-y-4">
- <label className="mb-2 block text-sm font-semibold text-zinc-700">
- Model / Talent
- </label>
- {talents.length > 0 ? (
- <div className="grid grid-cols-2 gap-3">
- {talents.map((talent) => (
- <button
- key={talent.id}
- onClick={() => setSelectedTalent(talent.id)}
- aria-pressed={selectedTalent === talent.id}
- className={`flex flex-col items-center gap-2 rounded-lg border p-3 text-sm transition-all ${
- selectedTalent === talent.id
- ? "border-primary bg-primary/5 text-primary"
- : "border-zinc-200 hover:border-zinc-300 bg-white "
- }`}
- >
- {talent.photo_url ? (
- <Image
- src={talent.photo_url}
- alt={talent.name}
- width={60}
- height={60}
- className="rounded-full object-cover"
+ <ModelPicker
+ value={model}
+ onChange={(next) => setModel(next)}
  />
- ) : (
- <div className="h-12 w-12">
- <ImagePlaceholder label={talent.name} rounded />
- </div>
- )}
- <span className="text-center">{talent.name}</span>
- {settings.show_additional_fee &&
- talent.additional_fee > 0 && (
- <span className="text-xs text-zinc-500">
- +Rp{" "}
- {talent.additional_fee.toLocaleString("id-ID")}
- </span>
- )}
- </button>
- ))}
- </div>
- ) : (
- <p className="text-sm text-zinc-500">
- Belum ada model tersedia.
- </p>
- )}
- </div>
 
- {/* Paket */}
- <div className="mt-4 space-y-4">
- <label className="mb-2 block text-sm font-semibold text-zinc-700">
- Paket Pemotretan
- </label>
- {packages.length > 0 ? (
- <div className="space-y-2">
- {packages.map((pkg) => (
- <button
- key={pkg.id}
- onClick={() => setSelectedPackage(pkg.id)}
- aria-pressed={selectedPackage === pkg.id}
- className={`flex w-full items-center justify-between gap-3 rounded-lg border p-3 text-left text-sm transition-all ${
- selectedPackage === pkg.id
- ? "border-primary bg-primary/5 text-primary"
- : "border-zinc-200 hover:border-zinc-300 bg-white "
- }`}
- >
- <div className="min-w-0">
- <div className="font-medium">{pkg.name}</div>
- <div className="text-xs text-zinc-500">
- {pkg.look_count} look • {pkg.photo_count} foto •{" "}
- {pkg.duration_minutes} menit
- </div>
- </div>
- <span className="shrink-0 font-semibold">
- {displayPrice(
- pkg.base_price,
- settings.show_package_price
- )}
- </span>
- </button>
- ))}
- </div>
- ) : (
- <p className="text-sm text-zinc-500">
- Belum ada paket tersedia.
- </p>
- )}
- </div>
+ <PackagePicker
+ packages={packages}
+ settings={settings}
+ value={pkgSel}
+ onChange={(next) => {
+ setPkgSel(next);
+ setFormError("");
+ }}
+ />
 
  {/* Jumlah */}
  <div className="mt-4 space-y-4">
@@ -287,22 +254,34 @@ export default function ProductDetailClient({
  </div>
  </div>
 
- {inCart ? (
- <div className="mt-6 rounded-lg border border-green-100 bg-green-50 p-3">
- <div className="flex items-center gap-2 text-sm font-medium text-green-700">
- <Check className="h-4 w-4" />
- Ditambahkan ke keranjang
- </div>
- </div>
- ) : (
- <button
- onClick={addToCart}
- className="mt-6 flex w-full items-center justify-center gap-2 rounded-lg bg-primary py-3 font-medium text-white transition-colors hover:bg-primary/90"
+ {formError && (
+ <p
+ ref={errorRef}
+ role="alert"
+ className="mt-4 text-sm font-medium text-red-600"
  >
+ {formError}
+ </p>
+ )}
+
+ <button
+ onClick={(e) => addToCart(e.currentTarget)}
+ className={`mt-6 flex w-full items-center justify-center gap-2 rounded-lg py-3 font-medium text-white transition-colors ${
+ added ? "bg-green-600" : "bg-primary hover:bg-primary/90"
+ }`}
+ >
+ {added ? (
+ <>
+ <Check className="h-4 w-4" />
+ Ditambahkan
+ </>
+ ) : (
+ <>
  <ShoppingCart className="h-4 w-4" />
  Tambah ke Keranjang
- </button>
+ </>
  )}
+ </button>
 
  <div className="mt-4 text-center text-xs text-zinc-500">
  Harga adalah estimasi hingga disepakati dengan admin.
@@ -310,6 +289,7 @@ export default function ProductDetailClient({
  </div>
 
  {/* WhatsApp quick contact */}
+ {WHATSAPP_NUMBER && (
  <div className="rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
  <h3 className="mb-4 text-lg font-bold text-foreground">
  Butuh Bantuan?
@@ -318,7 +298,7 @@ export default function ProductDetailClient({
  Hubungi admin lewat WhatsApp untuk konsultasi pemotretan.
  </p>
  <a
- href={`https://wa.me/${process.env.NEXT_PUBLIC_WHATSAPP_NUMBER || "6281234567890"}?text=${encodeURIComponent(
+ href={`https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(
  `Halo, saya tertarik memesan pemotretan untuk produk ${product.name}`
  )}`}
  target="_blank"
@@ -328,36 +308,8 @@ export default function ProductDetailClient({
  Hubungi via WhatsApp
  </a>
  </div>
+ )}
  </div>
- </div>
- </div>
-
- {/* CTA bar sticky (mobile) - harga + keranjang + WhatsApp */}
- <div className="fixed inset-x-0 bottom-0 z-40 border-t border-zinc-200 bg-white/95 px-4 py-3 shadow-[0_-4px_12px_rgba(0,0,0,0.08)] backdrop-blur lg:hidden">
- <div className="flex items-center gap-3">
- <div className="min-w-0 shrink-0">
- <p className="text-xs text-zinc-500">
- {displayPrice(product.base_price, settings.show_product_price)}
- </p>
- </div>
- <a
- href={`https://wa.me/${process.env.NEXT_PUBLIC_WHATSAPP_NUMBER || "6281234567890"}?text=${encodeURIComponent(
- `Halo, saya tertarik memesan pemotretan untuk produk ${product.name}`
- )}`}
- target="_blank"
- rel="noopener noreferrer"
- aria-label="Hubungi via WhatsApp"
- className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-green-500 text-xs font-semibold text-white transition-colors hover:bg-green-600"
- >
- WA
- </a>
- <button
- onClick={addToCart}
- className="flex h-11 flex-1 items-center justify-center gap-2 rounded-lg bg-primary px-4 font-medium text-white transition-colors hover:bg-primary/90"
- >
- <ShoppingCart className="h-4 w-4" />
- Tambah ke Keranjang
- </button>
  </div>
  </div>
  </div>

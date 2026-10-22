@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { Menu, X } from "lucide-react";
 
 const CART_KEY = "ekatalog_cart";
@@ -24,6 +24,15 @@ export function SiteHeader() {
   const [scrolled, setScrolled] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [cartCount, setCartCount] = useState(0);
+  // naik tiap kali foto produk tiba di keranjang (lihat components/cart/fly-to-cart.tsx)
+  const [bumpKey, setBumpKey] = useState(0);
+  const reduceMotion = useReducedMotion();
+
+  useEffect(() => {
+    const onBump = () => setBumpKey((k) => k + 1);
+    window.addEventListener("ekatalog:cart-bump", onBump);
+    return () => window.removeEventListener("ekatalog:cart-bump", onBump);
+  }, []);
 
   // Status scroll untuk efek "menempel" header
   useEffect(() => {
@@ -119,13 +128,40 @@ export function SiteHeader() {
         <div className="flex items-center gap-5">
           <Link
             href="/keranjang"
+            data-cart-target
             aria-label={`Keranjang${cartCount > 0 ? `, ${cartCount} item` : ""}`}
             className="text-sm text-ink transition-colors hover:text-muted"
           >
-            Keranjang
-            {cartCount > 0 && (
-              <span className="ml-1 font-mono text-xs">({cartLabel})</span>
-            )}
+            <motion.span
+              key={bumpKey}
+              className="inline-flex items-baseline"
+              // dipasang ulang tiap bump; initial={false} akan melewati animasinya
+              initial={bumpKey > 0 && !reduceMotion ? { scale: 1 } : false}
+              animate={
+                bumpKey > 0 && !reduceMotion ? { scale: [1, 1.3, 1] } : { scale: 1 }
+              }
+              transition={{ duration: 0.45, ease: "easeOut" }}
+            >
+              Keranjang
+              {cartCount > 0 && (
+                <span className="relative ml-1 inline-block overflow-hidden font-mono text-xs">
+                  (
+                  <AnimatePresence mode="popLayout" initial={false}>
+                    <motion.span
+                      key={cartLabel}
+                      className="inline-block"
+                      initial={reduceMotion ? false : { y: "100%", opacity: 0 }}
+                      animate={{ y: 0, opacity: 1 }}
+                      exit={reduceMotion ? undefined : { y: "-100%", opacity: 0 }}
+                      transition={{ duration: 0.25 }}
+                    >
+                      {cartLabel}
+                    </motion.span>
+                  </AnimatePresence>
+                  )
+                </span>
+              )}
+            </motion.span>
           </Link>
 
           <Link

@@ -2,13 +2,13 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { query, queryOne } from "@/lib/db";
 import { isAdmin } from "@/lib/auth-server";
+import { revalidatePublic } from "@/lib/revalidate";
 
 const packageSchema = z.object({
   name: z.string().min(1, "Nama wajib diisi"),
   description: z.string().nullable().optional(),
   base_price: z.coerce.number().int().nonnegative().optional().default(0),
   look_count: z.coerce.number().int().positive().nullable().optional(),
-  duration_minutes: z.coerce.number().int().positive().nullable().optional(),
   photo_count: z.coerce.number().int().positive().nullable().optional(),
   is_active: z.boolean().optional().default(true),
 });
@@ -53,22 +53,23 @@ export async function POST(req: Request) {
       );
     }
 
-    const { name, description, base_price, look_count, duration_minutes, photo_count, is_active } = parsed.data;
+    const { name, description, base_price, look_count, photo_count, is_active } = parsed.data;
 
     const rows = await queryOne<any>(
-      `INSERT INTO packages (name, description, base_price, look_count, duration_minutes, photo_count, is_active)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
+      `INSERT INTO packages (name, description, base_price, look_count, photo_count, is_active)
+       VALUES ($1, $2, $3, $4, $5, $6)
        RETURNING *`,
       [
         name,
         description || null,
         base_price || 0,
         look_count || null,
-        duration_minutes || null,
         photo_count || null,
         is_active ?? true,
       ]
     );
+
+    revalidatePublic();
 
     return NextResponse.json({ package: rows }, { status: 201 });
   } catch (err) {

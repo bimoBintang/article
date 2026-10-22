@@ -2,14 +2,27 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { authenticateAdmin } from "@/lib/auth";
 import { createAdminSession } from "@/lib/auth-server";
+import { rateLimitedShared } from "@/lib/rate-limit";
+import { getClientIp } from "@/lib/visitor";
 
 const loginSchema = z.object({
   email: z.string().email("Format email tidak valid"),
   password: z.string().min(1, "Kata sandi wajib diisi"),
 });
 
+// Batasi percobaan masuk per IP dan per email untuk menahan tebak-tebakan kata sandi
+const LOGIN_WINDOW_MS = 15 * 60_000;
+
 export async function POST(req: Request) {
   try {
+    const ip = getClientIp(req.headers) ?? "unknown";
+    if (await rateLimitedShared(`login-ip:${ip}`, 20, LOGIN_WINDOW_MS)) {
+      return NextResponse.json(
+        { error: "Terlalu banyak percobaan. Coba lagi beberapa menit lagi." },
+        { status: 429 }
+      );
+    }
+
     const body = await req.json();
 
     const parsed = loginSchema.safeParse(body);
@@ -22,6 +35,13 @@ export async function POST(req: Request) {
     }
 
     const { email, password } = parsed.data;
+
+    if (await rateLimitedShared(`login-email:${email.toLowerCase()}`, 8, LOGIN_WINDOW_MS)) {
+      return NextResponse.json(
+        { error: "Terlalu banyak percobaan. Coba lagi beberapa menit lagi." },
+        { status: 429 }
+      );
+    }
 
     const result = await authenticateAdmin(email, password);
 

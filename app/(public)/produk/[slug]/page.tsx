@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { query } from "@/lib/db";
-import type { Product, Talent, Package, ProductImage } from "@/types";
+import type { Product, Package, ProductImage } from "@/types";
 import { getSettings } from "@/lib/settings";
 import { JsonLd } from "@/components/seo/json-ld";
 import { breadcrumbSchema, productSchema } from "@/lib/seo-schema";
@@ -17,7 +17,13 @@ import {
 } from "@/lib/seo";
 import ProductDetailClient from "./product-detail-client";
 
-export const dynamic = "force-dynamic";
+// ISR: di-cache 60 detik; perubahan admin memanggil revalidatePublic() (lib/revalidate.ts) agar langsung terlihat
+export const revalidate = 60;
+
+/** Tanpa prarender saat build: halaman produk dibuat saat pertama dibuka lalu di-cache (ISR). */
+export function generateStaticParams() {
+  return [];
+}
 
 type ModelAsset = {
   id: string;
@@ -58,23 +64,10 @@ async function getModelAsset(productId: string): Promise<ModelAsset | null> {
   }
 }
 
-async function getTalents(): Promise<Talent[]> {
-  try {
-    return await query<Talent>(
-      `SELECT id, name, photo_url, height_cm, size, style, additional_fee, consent_ref, is_available, created_at
-       FROM talents
-       WHERE is_available = true
-       ORDER BY name ASC`
-    );
-  } catch {
-    return [];
-  }
-}
-
 async function getPackages(): Promise<Package[]> {
   try {
     return await query<Package>(
-      `SELECT id, name, description, base_price, look_count, duration_minutes, photo_count, is_active, created_at
+      `SELECT id, name, description, base_price, look_count, photo_count, is_active, created_at
        FROM packages
        WHERE is_active = true
        ORDER BY base_price ASC`
@@ -174,9 +167,8 @@ export default async function ProductDetailPage({
   }
 
   // Fetch data relasional secara paralel
-  const [modelAsset, talents, packages, images, settings] = await Promise.all([
+  const [modelAsset, packages, images, settings] = await Promise.all([
     getModelAsset(product.id),
-    getTalents(),
     getPackages(),
     getProductImages(product.id),
     getSettings(),
@@ -206,7 +198,6 @@ export default async function ProductDetailPage({
       <ProductDetailClient
         product={product}
         modelAsset={modelAsset}
-        talents={talents}
         packages={packages}
         images={images}
         settings={settings}

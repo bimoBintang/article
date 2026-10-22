@@ -45,9 +45,9 @@ loadEnv();
 
 const DRY_RUN = process.argv.includes("--dry-run");
 
-const MAX_DIMENSION = 1600;
-const QUALITY = 82;
-const SKIP_BYTES = 250 * 1024; // di bawah ini tidak perlu dikompresi
+const MAX_DIMENSION = 2400;
+const QUALITY = 90;
+const SKIP_BYTES = 700 * 1024; // sama dengan IMAGE_BYTE_BUDGET di lib/upload-client.ts; di bawah ini jangan dikompres ulang
 
 const endpoint = process.env.OBJECT_STORAGE_ENDPOINT;
 const bucket = process.env.OBJECT_STORAGE_BUCKET || "uploads";

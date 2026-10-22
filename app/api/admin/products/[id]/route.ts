@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { query, queryOne } from "@/lib/db";
 import { isAdmin } from "@/lib/auth-server";
+import { revalidatePublic } from "@/lib/revalidate";
 
 const productSchema = z.object({
   name: z.string().min(1, "Nama wajib diisi").optional(),
@@ -75,6 +76,8 @@ export async function PUT(
 
     const rows = await queryOne<any>(sql, values);
 
+    revalidatePublic();
+
     return NextResponse.json({ product: rows });
   } catch (err) {
     console.error("Update product error:", err);
@@ -95,6 +98,8 @@ export async function DELETE(
     const { id } = await params;
 
     await query(`DELETE FROM products WHERE id = $1`, [id]);
+
+    revalidatePublic();
 
     return NextResponse.json({ success: true });
   } catch (err) {

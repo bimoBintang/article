@@ -106,6 +106,7 @@ export function ProductGallery({
  alt={active.alt_text || productName}
  fill
  priority
+ quality={90}
  className="object-contain p-4"
  sizes="(max-width: 1024px) 100vw, 60vw"
  />
@@ -209,6 +210,7 @@ export function ProductGallery({
  alt={active.alt_text || productName}
  fill
  priority
+ quality={90}
  className="object-contain"
  sizes="100vw"
  />

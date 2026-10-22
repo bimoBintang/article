@@ -2,8 +2,11 @@ import Link from "next/link";
 import { query } from "@/lib/db";
 import { getCurrentSession } from "@/lib/auth-server";
 import { Alert } from "@/components/ui/alert";
+import { decryptFields } from "@/lib/pii";
 import nextDynamic from "next/dynamic";
 import { Skeleton } from "@/components/ui/skeleton";
+import { ScheduleCalendar } from "@/components/admin/schedule-calendar";
+import { currentMonth, getScheduleMonth, type ScheduleMonth } from "@/lib/schedule";
 import {
   getDailyTraffic,
   getDeviceBreakdown,
@@ -51,7 +54,7 @@ export default async function AdminDashboard() {
   let stats: any = {
     totalRequests: 0,
     pendingRequests: 0,
-    paidInvoices: 0,
+    completedRequests: 0,
     totalRevenue: 0,
   };
 
@@ -63,9 +66,10 @@ export default async function AdminDashboard() {
   let devices: Awaited<ReturnType<typeof getDeviceBreakdown>> = [];
   let statuses: Awaited<ReturnType<typeof getRequestStatusBreakdown>> = [];
   let topPages: Awaited<ReturnType<typeof getTopPages>> = [];
+  let schedule: ScheduleMonth | null = null;
 
   try {
-    const [reqStats, invStats, recent, t, d, st, tp] = await Promise.all([
+    const [reqStats, invStats, recent, t, d, st, tp, sched] = await Promise.all([
       query<any>(
         `SELECT status, COUNT(*) as cnt FROM requests GROUP BY status`
       ),
@@ -79,19 +83,23 @@ export default async function AdminDashboard() {
       getDeviceBreakdown(),
       getRequestStatusBreakdown(),
       getTopPages(),
+      getScheduleMonth(currentMonth()),
     ]);
 
     traffic = t;
     devices = d;
     statuses = st;
     topPages = tp;
+    schedule = sched;
 
     stats.totalRequests = reqStats.reduce((sum: number, r: any) => sum + parseInt(r.cnt), 0);
     stats.pendingRequests = reqStats.find((r: any) => r.status === "SUBMITTED")?.cnt || 0;
     const paid = invStats.find((i: any) => i.status === "PAID");
-    stats.paidInvoices = paid ? parseInt(paid.cnt) : 0;
+    stats.completedRequests = parseInt(
+      reqStats.find((r: { status: string; cnt: string }) => r.status === "COMPLETED")?.cnt ?? "0"
+    );
     stats.totalRevenue = paid ? parseInt(paid.total) : 0;
-    recentRequests = recent;
+    recentRequests = recent.map((r) => decryptFields(r));
   } catch {
     dbAvailable = false;
   }
@@ -138,10 +146,10 @@ export default async function AdminDashboard() {
           bar="bg-amber-500"
         />
         <StatCard
-          title="Terbayar"
-          value={stats.paidInvoices}
-          accent="text-green-600 dark:text-green-400"
-          bar="bg-green-500"
+          title="Permintaan Selesai"
+          value={stats.completedRequests}
+          accent="text-emerald-600 dark:text-emerald-400"
+          bar="bg-emerald-500"
         />
         <StatCard
           title="Total Pendapatan"
@@ -150,6 +158,9 @@ export default async function AdminDashboard() {
           bar="bg-indigo-500"
         />
       </div>
+
+      {/* Kalender jadwal pemotretan */}
+      {schedule && <ScheduleCalendar initial={schedule} />}
 
       {/* Grafik & monitoring */}
       <DashboardCharts

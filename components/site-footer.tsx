@@ -22,10 +22,10 @@ const FOOTER_LINKS = [
 export function SiteFooter() {
   return (
     <footer className="border-t border-line bg-paper">
-      <div className="mx-auto max-w-7xl px-4 pb-10 pt-16 sm:px-6 lg:px-8">
-        <div className="grid gap-12 md:grid-cols-12">
+      <div className="mx-auto max-w-7xl px-4 pb-8 pt-12 sm:px-6 sm:pb-10 sm:pt-16 lg:px-8">
+        <div className="grid grid-cols-2 gap-x-6 gap-y-10 md:grid-cols-12 md:gap-12">
           {/* Brand */}
-          <div className="md:col-span-5">
+          <div className="col-span-2 md:col-span-5">
             <Link href="/" className="font-display font-extrabold text-2xl tracking-[-0.03em] [word-spacing:0.06em] text-ink">
               Article
             </Link>
@@ -58,7 +58,7 @@ export function SiteFooter() {
           ))}
 
           {/* Kontak */}
-          <div className="md:col-span-3">
+          <div className="col-span-2 md:col-span-3">
             <h3 className="text-[11px] font-medium uppercase tracking-[0.18em] text-muted">
               Kontak
             </h3>
@@ -79,7 +79,7 @@ export function SiteFooter() {
           </div>
         </div>
 
-        <div className="mt-16 flex flex-col justify-between gap-2 border-t border-line pt-6 text-xs text-muted sm:flex-row">
+        <div className="mt-12 flex flex-col justify-between sm:mt-16 gap-2 border-t border-line pt-6 text-xs text-muted sm:flex-row">
           <p>&copy; {new Date().getFullYear()} Article</p>
           <p>Harga dan layanan dapat berubah sewaktu-waktu.</p>
         </div>

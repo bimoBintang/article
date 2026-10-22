@@ -1,3 +1,4 @@
+import { randomInt } from "node:crypto";
 import { compare, hash } from "bcryptjs";
 import { query, queryOne } from "./db";
 
@@ -21,13 +22,17 @@ export type SessionData = {
   isLoggedIn?: boolean;
 };
 
+/** Hash palsu supaya waktu respons sama untuk email yang tidak terdaftar (cegah penebakan akun lewat waktu). */
+const DUMMY_HASH = "$2b$12$PDFCg625VKeRqQUWA1uLeOlmtYyDxILxrA2KlcZz9ZWCz9rD6nW5y";
+
 export async function authenticateAdmin(email: string, password: string) {
   const user = await queryOne<{ id: string; email: string; password_hash: string; role: string }>(
-    `SELECT id, email, password_hash, role FROM admin_users WHERE email = $1`,
+    `SELECT id, email, password_hash, role FROM admin_users WHERE lower(email) = lower($1)`,
     [email]
   );
 
   if (!user) {
+    await compare(password, DUMMY_HASH);
     return { success: false, error: "Email atau kata sandi salah." };
   }
 
@@ -48,9 +53,7 @@ export async function hashPassword(password: string) {
 
 export function generateRequestNumber() {
   const prefix = "REQ";
-  const random = Math.floor(Math.random() * 1000000)
-    .toString()
-    .padStart(6, "0");
+  const random = randomInt(0, 1_000_000).toString().padStart(6, "0");
   return `${prefix}-${random}`;
 }
 

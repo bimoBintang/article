@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { isAdmin } from "@/lib/auth-server";
 import { getSettings, setSetting, SETTING_KEYS } from "@/lib/settings";
+import { revalidatePublic } from "@/lib/revalidate";
 
 /** Ambil semua pengaturan (khusus admin). */
 export async function GET() {
@@ -68,6 +69,7 @@ export async function PUT(req: Request) {
     }
 
     const settings = await getSettings();
+    revalidatePublic();
     return NextResponse.json({ settings });
   } catch (err) {
     console.error("Update settings error:", err);

@@ -1,73 +1,75 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { useSettings } from "@/lib/use-settings";
+import { useEffect, useState } from "react";
+import Link from "next/link";
+import { ChevronRight, Copy, Check } from "lucide-react";
 import {
   TablePreview,
   useTablePreview,
 } from "@/components/admin/table-preview";
-import Link from "next/link";
-import { ChevronRight } from "lucide-react";
-import { query } from "@/lib/db";
 import { Alert } from "@/components/ui/alert";
 import { SkeletonPageHeader, SkeletonTable } from "@/components/ui/skeleton";
+import { INVOICE_STATUS_COLORS, INVOICE_STATUS_LABELS, rupiah } from "@/lib/invoice-status";
+import { paymentMethodLabel } from "@/lib/payment-methods";
+
+type InvoiceRow = {
+  id: string;
+  invoice_number: string | null;
+  order_id: string;
+  total: number;
+  status: string;
+  payment_method: string | null;
+  created_at: string;
+  request_id: string;
+  request_number: string;
+  customer_name: string;
+  customer_email: string;
+};
 
 export default function AdminInvoices() {
-  const { settings } = useSettings(true);
   const { preview, openPreview, closePreview } = useTablePreview();
-  const [invoices, setInvoices] = useState<any[]>([]);
+  const [invoices, setInvoices] = useState<InvoiceRow[]>([]);
   const [loading, setLoading] = useState(true);
-
-  const statusColors: Record<string, string> = {
-    PENDING: "bg-amber-50 text-amber-700 border-amber-200",
-    PAID: "bg-green-50 text-green-700 border-green-200",
-    FAILED: "bg-red-50 text-red-700 border-red-200",
-    CANCELLED: "bg-red-50 text-red-700 border-red-200",
-    EXPIRED: "bg-gray-50 text-gray-700 border-gray-200",
-    REFUNDED: "bg-purple-50 text-purple-700 border-purple-200",
-  };
+  const [error, setError] = useState("");
+  const [copied, setCopied] = useState(false);
+  const [webhookUrl, setWebhookUrl] = useState("");
 
   useEffect(() => {
-    loadInvoices();
+    fetch("/api/admin/invoices", { cache: "no-store" })
+      .then(async (res) => {
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || "Gagal memuat invoice");
+        setInvoices(data.invoices);
+      })
+      .catch((e: Error) => setError(e.message))
+      .finally(() => {
+        setWebhookUrl(`${window.location.origin}/api/webhooks/midtrans`);
+        setLoading(false);
+      });
   }, []);
 
-  function previewInvoice(inv: any) {
+  function previewInvoice(inv: InvoiceRow) {
     openPreview({
-      title: inv.order_id || "Invoice",
+      title: inv.invoice_number || inv.order_id || "Invoice",
       subtitle: inv.request_number ? `#${inv.request_number}` : undefined,
       meta: [
         { label: "Pelanggan", value: inv.customer_name || "-" },
         { label: "Email", value: inv.customer_email || "-" },
-        {
-          label: "Total",
-          value: settings.show_package_price
-            ? `Rp ${parseInt(inv.total || 0).toLocaleString("id-ID")}`
-            : "-",
-        },
-        { label: "Status", value: inv.status || "-" },
-        {
-          label: "Dibuat",
-          value: inv.created_at
-            ? new Date(inv.created_at).toLocaleString("id-ID")
-            : "-",
-        },
+        { label: "Total", value: rupiah(inv.total) },
+        { label: "Metode", value: inv.payment_method ? paymentMethodLabel(inv.payment_method) : "-" },
+        { label: "Status", value: INVOICE_STATUS_LABELS[inv.status as keyof typeof INVOICE_STATUS_LABELS] ?? inv.status },
+        { label: "Dibuat", value: inv.created_at ? new Date(inv.created_at).toLocaleString("id-ID") : "-" },
       ],
     });
   }
 
-  async function loadInvoices() {
+  async function copyWebhook() {
     try {
-      const rows = await query<any>(
-        `SELECT i.*, r.number as request_number, r.customer_name, r.customer_email
-         FROM invoices i
-         JOIN requests r ON r.id = i.request_id
-         ORDER BY i.created_at DESC`
-      );
-      setInvoices(rows);
+      await navigator.clipboard.writeText(webhookUrl);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
     } catch {
-      setInvoices([]);
-    } finally {
-      setLoading(false);
+      // clipboard bisa diblokir; URL tetap terlihat untuk disalin manual
     }
   }
 
@@ -80,23 +82,52 @@ export default function AdminInvoices() {
     );
   }
 
+  const th = "whitespace-nowrap px-4 py-3 text-sm font-medium text-zinc-500 dark:text-zinc-400 sm:px-6";
+
   return (
     <div className="space-y-6">
-      <h1 className="text-xl font-bold text-foreground sm:text-2xl">
-        Kelola Invoice
-      </h1>
+      <h1 className="text-xl font-bold text-foreground sm:text-2xl">Kelola Invoice</h1>
+
+      {error && (
+        <Alert variant="error" title="Gagal memuat">
+          {error}
+        </Alert>
+      )}
+
+      <section className="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
+        <h2 className="text-sm font-semibold text-foreground">URL notifikasi Midtrans</h2>
+        <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+          Isi di dashboard Midtrans (Settings &gt; Configuration &gt; Payment Notification URL). Key, mode, dan metode diatur di{" "}
+          <Link href="/admin/midtrans" className="text-primary hover:underline">halaman Midtrans</Link>. Harus alamat publik; saat
+          lokal, status tetap diperbarui lewat pengecekan otomatis di halaman bayar atau tombol Sinkronkan.
+        </p>
+        <div className="mt-3 flex items-center gap-2">
+          <code className="min-w-0 flex-1 truncate rounded-lg bg-zinc-100 px-3 py-2 font-mono text-xs text-foreground dark:bg-zinc-800">
+            {webhookUrl}
+          </code>
+          <button
+            type="button"
+            onClick={copyWebhook}
+            aria-label="Salin URL notifikasi"
+            className="shrink-0 rounded-lg border border-zinc-300 p-2 text-zinc-600 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+          >
+            {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+          </button>
+        </div>
+      </section>
 
       {invoices.length > 0 ? (
         <div className="overflow-x-auto rounded-xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
-          <table className="w-full min-w-[780px] text-left">
+          <table className="w-full min-w-[820px] text-left">
             <thead>
               <tr className="border-b border-zinc-200 dark:border-zinc-800">
-                <th className="whitespace-nowrap px-4 py-3 text-sm font-medium text-zinc-500 dark:text-zinc-400 sm:px-6">Order ID</th>
-                <th className="whitespace-nowrap px-4 py-3 text-sm font-medium text-zinc-500 dark:text-zinc-400 sm:px-6">Permintaan</th>
-                <th className="whitespace-nowrap px-4 py-3 text-sm font-medium text-zinc-500 dark:text-zinc-400 sm:px-6">Pelanggan</th>
-                <th className="whitespace-nowrap px-4 py-3 text-sm font-medium text-zinc-500 dark:text-zinc-400 sm:px-6">Total</th>
-                <th className="whitespace-nowrap px-4 py-3 text-sm font-medium text-zinc-500 dark:text-zinc-400 sm:px-6">Status</th>
-                <th className="whitespace-nowrap px-4 py-3 text-sm font-medium text-zinc-500 dark:text-zinc-400 sm:px-6 text-right">Aksi</th>
+                <th className={th}>Invoice</th>
+                <th className={th}>Permintaan</th>
+                <th className={th}>Email</th>
+                <th className={th}>Total</th>
+                <th className={th}>Metode</th>
+                <th className={th}>Status</th>
+                <th className={`${th} text-right`}>Aksi</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
@@ -107,29 +138,28 @@ export default function AdminInvoices() {
                   className="hover:bg-zinc-50 dark:hover:bg-zinc-800"
                 >
                   <td className="px-4 py-4 sm:px-6">
-                    <div className="font-mono font-medium text-sm text-foreground">{inv.order_id}</div>
+                    <div className="font-mono text-sm font-medium text-foreground">{inv.invoice_number ?? inv.order_id}</div>
                   </td>
                   <td className="px-4 py-4 sm:px-6">
-                    <div className="font-medium text-sm text-foreground">#{inv.request_number}</div>
+                    <div className="text-sm font-medium text-foreground">#{inv.request_number}</div>
                     <div className="text-xs text-zinc-500 dark:text-zinc-400">{inv.customer_name}</div>
                   </td>
-                  <td className="px-4 py-4 sm:px-6 text-sm text-zinc-600 dark:text-zinc-400">{inv.customer_email}</td>
-                  <td className="px-4 py-4 sm:px-6 text-sm font-medium text-foreground">
-                    {settings.show_package_price
-                      ? `Rp ${parseInt(inv.total || 0).toLocaleString("id-ID")}`
-                      : "-"}
+                  <td className="px-4 py-4 text-sm text-zinc-600 dark:text-zinc-400 sm:px-6">{inv.customer_email}</td>
+                  <td className="px-4 py-4 text-sm font-medium text-foreground sm:px-6">{rupiah(inv.total)}</td>
+                  <td className="px-4 py-4 text-sm text-zinc-600 dark:text-zinc-400 sm:px-6">
+                    {inv.payment_method ? paymentMethodLabel(inv.payment_method) : "-"}
                   </td>
                   <td className="px-4 py-4 sm:px-6">
-                    <span className={`px-2 py-1 rounded-full text-xs font-medium border ${statusColors[inv.status] || "bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300"}`}>
-                      {inv.status}
+                    <span className={`rounded-full border px-2 py-1 text-xs font-medium ${INVOICE_STATUS_COLORS[inv.status] ?? "bg-zinc-100 text-zinc-700"}`}>
+                      {INVOICE_STATUS_LABELS[inv.status as keyof typeof INVOICE_STATUS_LABELS] ?? inv.status}
                     </span>
                   </td>
-                  <td className="px-4 py-4 sm:px-6 text-right">
+                  <td className="px-4 py-4 text-right sm:px-6">
                     <Link
                       href={`/admin/invoices/${inv.id}`}
-                      className="text-xs text-primary hover:underline flex items-center gap-1"
+                      className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
                     >
-                      Detail <ChevronRight className="w-3 h-3" />
+                      Detail <ChevronRight className="h-3 w-3" />
                     </Link>
                   </td>
                 </tr>
@@ -138,11 +168,13 @@ export default function AdminInvoices() {
           </table>
         </div>
       ) : (
-        <Alert variant="info" title="Belum ada invoice">
-          Invoice akan muncul setelah pelanggan menyelesaikan pembayaran Midtrans.
-        </Alert>
+        !error && (
+          <Alert variant="info" title="Belum ada invoice">
+            Buat invoice dari halaman detail sebuah permintaan. Pelanggan menerima tautan bayar lewat email.
+          </Alert>
+        )
       )}
-      {/* Preview double-click */}
+
       <TablePreview
         open={Boolean(preview)}
         onClose={closePreview}
@@ -151,7 +183,6 @@ export default function AdminInvoices() {
         images={preview?.images}
         meta={preview?.meta}
       />
-
     </div>
   );
 }

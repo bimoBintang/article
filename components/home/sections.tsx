@@ -1,5 +1,11 @@
 import Link from "next/link";
 import { Reveal } from "./reveal";
+import { StepsAnimated } from "./steps-animated";
+import {
+  InfiniteMovingCards,
+  TestimonialCard,
+  type MovingCardItem,
+} from "./infinite-moving-cards";
 
 const STEPS = [
   {
@@ -46,32 +52,16 @@ export function Kicker({ children }: { children: React.ReactNode }) {
 
 export function HowItWorks() {
   return (
-    <section id="cara-kerja" className="scroll-mt-24 border-t border-line py-24 sm:py-32">
+    <section id="cara-kerja" className="scroll-mt-24 border-t border-line py-16 sm:py-32">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
         <Reveal className="max-w-2xl">
           <Kicker>Cara kerja</Kicker>
-          <h2 className="mt-4 font-display font-extrabold text-4xl leading-[1] tracking-[-0.03em] [word-spacing:0.06em] text-ink sm:text-5xl">
+          <h2 className="mt-4 font-display font-extrabold text-2xl leading-none tracking-[-0.03em] [word-spacing:0.06em] text-ink sm:text-5xl">
             Tiga langkah dari katalog ke studio.
           </h2>
         </Reveal>
 
-        <ol className="mt-16 grid gap-12 sm:grid-cols-3 sm:gap-8">
-          {STEPS.map((step, i) => (
-            <li key={step.title}>
-              <Reveal delay={i * 0.08} className="border-t border-ink pt-6">
-                <span className="font-display font-extrabold text-5xl leading-none text-ink">
-                  {String(i + 1).padStart(2, "0")}
-                </span>
-                <h3 className="mt-8 text-base font-medium text-ink">
-                  {step.title}
-                </h3>
-                <p className="mt-2 max-w-xs text-sm leading-relaxed text-muted">
-                  {step.desc}
-                </p>
-              </Reveal>
-            </li>
-          ))}
-        </ol>
+        <StepsAnimated steps={STEPS} />
       </div>
     </section>
   );
@@ -79,12 +69,12 @@ export function HowItWorks() {
 
 export function Features() {
   return (
-    <section id="fitur" className="scroll-mt-24 border-t border-line py-24 sm:py-32">
-      <div className="mx-auto grid max-w-7xl gap-12 px-4 sm:px-6 lg:grid-cols-12 lg:gap-8 lg:px-8">
+    <section id="fitur" className="scroll-mt-24 border-t border-line py-16 sm:py-32">
+      <div className="mx-auto grid max-w-7xl gap-10 px-4 sm:gap-12 sm:px-6 lg:grid-cols-12 lg:gap-8 lg:px-8">
         <div className="lg:col-span-5">
           <Reveal className="lg:sticky lg:top-28">
             <Kicker>Layanan</Kicker>
-            <h2 className="mt-4 font-display font-extrabold text-4xl leading-[1] tracking-[-0.03em] [word-spacing:0.06em] text-ink sm:text-5xl">
+            <h2 className="mt-4 font-display font-extrabold text-2xl leading-none tracking-[-0.03em] [word-spacing:0.06em] text-ink sm:text-5xl">
               Produk terlihat jelas, prosesnya singkat.
             </h2>
             <p className="mt-6 max-w-md text-base leading-relaxed text-muted">
@@ -94,17 +84,17 @@ export function Features() {
           </Reveal>
         </div>
 
-        <dl className="divide-y divide-line border-y border-line lg:col-span-7">
+        <dl className="grid grid-cols-2 gap-3 sm:block sm:gap-0 sm:divide-y sm:divide-line sm:border-y sm:border-line lg:col-span-7">
           {FEATURES.map((feature, i) => (
             <Reveal
               key={feature.title}
               delay={i * 0.06}
-              className="grid gap-2 py-7 sm:grid-cols-5 sm:gap-8"
+              className="border border-line p-4 sm:grid sm:grid-cols-5 sm:gap-8 sm:border-0 sm:px-0 sm:py-7"
             >
-              <dt className="text-base font-medium text-ink sm:col-span-2">
+              <dt className="text-sm font-medium text-ink sm:col-span-2 sm:text-base">
                 {feature.title}
               </dt>
-              <dd className="text-sm leading-relaxed text-muted sm:col-span-3">
+              <dd className="mt-2 text-xs leading-relaxed text-muted sm:col-span-3 sm:mt-0 sm:text-sm">
                 {feature.desc}
               </dd>
             </Reveal>
@@ -115,13 +105,50 @@ export function Features() {
   );
 }
 
+/**
+ * Testimoni pelanggan. Tersembunyi bila belum ada yang diterbitkan.
+ * Marquee butuh cukup kartu agar terlihat wajar; di bawah 3 kartu
+ * ditampilkan statis saja.
+ */
+export function Testimonials({ items }: { items: MovingCardItem[] }) {
+  if (items.length === 0) return null;
+
+  return (
+    <section
+      id="testimoni"
+      className="scroll-mt-24 border-t border-line py-24 sm:py-32"
+    >
+      <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+        <Reveal className="max-w-2xl">
+          <Kicker>Testimoni</Kicker>
+          <h2 className="mt-4 font-display font-extrabold text-2xl leading-none tracking-[-0.03em] [word-spacing:0.06em] text-ink sm:text-5xl">
+            Kata mereka tentang prosesnya.
+          </h2>
+        </Reveal>
+      </div>
+
+      <Reveal className="mt-14">
+        {items.length >= 3 ? (
+          <InfiniteMovingCards items={items} />
+        ) : (
+          <div className="mx-auto grid max-w-7xl gap-4 px-4 sm:grid-cols-2 sm:px-6 lg:px-8">
+            {items.map((item) => (
+              <TestimonialCard key={item.id} item={item} />
+            ))}
+          </div>
+        )}
+      </Reveal>
+    </section>
+  );
+}
+
 export function CtaBand() {
   return (
     <section id="tentang" className="scroll-mt-24 bg-ink text-paper">
       <div className="mx-auto max-w-7xl px-4 py-24 sm:px-6 sm:py-28 lg:px-8">
         <Reveal className="flex flex-col gap-10 lg:flex-row lg:items-end lg:justify-between">
           <div className="max-w-2xl">
-            <h2 className="font-display font-extrabold text-4xl leading-[1] tracking-[-0.03em] [word-spacing:0.06em] sm:text-6xl">
+            <h2 className="font-display font-extrabold text-2xl leading-none tracking-[-0.03em] [word-spacing:0.06em] sm:text-6xl">
               Siap memotret koleksi berikutnya?
             </h2>
             <p className="mt-6 max-w-lg text-base leading-relaxed text-white/60">

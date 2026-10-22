@@ -1,4 +1,5 @@
 import { randomBytes } from "crypto";
+import { isIP } from "node:net";
 import { getSql } from "@/lib/db";
 
 /**
@@ -92,27 +93,72 @@ export function parseUserAgent(userAgent: string | null): DeviceInfo {
   return { device, deviceType, browser, os };
 }
 
+/** Jumlah proxy tepercaya di depan aplikasi (1 = satu CDN/load balancer yang menambahkan IP klien di ujung kanan x-forwarded-for). */
+function trustedProxyCount(): number {
+  const n = Number.parseInt(process.env.TRUSTED_PROXY_COUNT ?? "", 10);
+  return Number.isInteger(n) && n >= 1 ? n : 1;
+}
+
+/** Buang port/kurung dari entri header lalu pastikan berupa alamat IP yang valid. */
+function cleanIp(value: string | null | undefined): string | null {
+  let ip = value?.trim() ?? "";
+  const bracket = /^\[(.+)\](?::\d+)?$/.exec(ip);
+  if (bracket) ip = bracket[1];
+  else if (/^\d+\.\d+\.\d+\.\d+:\d+$/.test(ip)) ip = ip.split(":")[0];
+  if (!ip || ip === "::1" || isIP(ip) === 0) return null;
+  return ip;
+}
+
 /**
- * Ambil IP address dari header proxy (x-forwarded-for, x-real-ip, dll).
+ * IP klien yang bisa dipercaya untuk pembatas laju dan analitik.
+ *
+ * Header yang dikirim klien mudah dipalsukan, jadi hanya yang ditambahkan proxy
+ * kita sendiri yang dipakai:
+ * - `CLIENT_IP_HEADER` diisi (mis. `x-vercel-forwarded-for`, `cf-connecting-ip`):
+ *   hanya header itu yang dibaca.
+ * - selain itu `x-forwarded-for`, entri ke-`TRUSTED_PROXY_COUNT` dari kanan
+ *   (isian klien berada di kiri dan diabaikan).
+ * Tanpa proxy (mis. lokal) hasilnya null.
  */
 export function getClientIp(headers: Headers): string | null {
-  const candidates = [
-    headers.get("x-forwarded-for"),
-    headers.get("x-real-ip"),
-    headers.get("cf-connecting-ip"),
-    headers.get("true-client-ip"),
-    headers.get("x-vercel-forwarded-for"),
-  ];
+  const custom = process.env.CLIENT_IP_HEADER?.trim().toLowerCase();
+  if (custom) return cleanIp(headers.get(custom)?.split(",")[0]);
 
-  for (const value of candidates) {
-    if (!value) continue;
-    // x-forwarded-for bisa berisi daftar: "ip1, ip2, ip3"
-    const ip = value.split(",")[0]?.trim();
-    if (ip && ip !== "::1" && ip !== "unknown") {
-      return ip.slice(0, 45);
-    }
+  const forwarded = headers.get("x-forwarded-for");
+  if (!forwarded) return null;
+  const hops = forwarded.split(",").map((h) => h.trim()).filter(Boolean);
+  return cleanIp(hops[Math.max(hops.length - trustedProxyCount(), 0)]);
+}
+
+/** Jadikan 8 kelompok heksadesimal dari alamat IPv6 (menguraikan "::"). */
+function expandIpv6(ip: string): string[] | null {
+  const [head, tail, extra] = ip.split("::");
+  if (extra !== undefined) return null;
+  const left = head ? head.split(":") : [];
+  const right = tail ? tail.split(":") : [];
+  const missing = 8 - left.length - right.length;
+  if (tail === undefined ? left.length !== 8 : missing < 0) return null;
+  return [...left, ...Array(tail === undefined ? 0 : missing).fill("0"), ...right];
+}
+
+/**
+ * Samarkan IP sebelum disimpan: IPv4 jadi /24 (a.b.c.0), IPv6 jadi /48 (a:b:c::).
+ * Cukup untuk statistik wilayah/perangkat, tetapi tidak lagi menunjuk satu orang.
+ */
+export function anonymizeIp(ip: string | null | undefined): string | null {
+  if (!ip) return null;
+  const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/i.exec(ip);
+  const v4 = mapped ? mapped[1] : ip;
+  if (isIP(v4) === 4) {
+    const parts = v4.split(".");
+    parts[3] = "0";
+    return parts.join(".");
   }
-
+  if (isIP(ip) === 6) {
+    const groups = expandIpv6(ip);
+    if (!groups) return null;
+    return `${groups.slice(0, 3).map((g) => g.replace(/^0+(?=.)/, "").toLowerCase()).join(":")}::`;
+  }
   return null;
 }
 
@@ -136,16 +182,19 @@ export async function trackVisit({
   visitorKey,
   path,
   userAgent,
-  ipAddress,
+  ipAddress: rawIp,
   referrer,
 }: {
   visitorKey: string;
   path: string;
   userAgent: string | null;
+  /** IP penuh dari getClientIp; disamarkan sebelum disimpan */
   ipAddress: string | null;
   referrer: string | null;
 }): Promise<void> {
   const { device, deviceType, browser, os } = parseUserAgent(userAgent);
+  // Hanya IP tersamar yang masuk database; IP penuh dipakai sebatas pembatas laju
+  const ipAddress = anonymizeIp(rawIp);
   const sql = getSql();
 
   // Upsert visitor
@@ -185,4 +234,21 @@ export async function trackVisit({
       ${ipAddress}, ${device}, ${browser}, ${os}
     )
   `;
+
+  // Pembersihan masa simpan dijalankan sesekali supaya tidak butuh cron
+  const rate = Number.parseFloat(process.env.VISITOR_PURGE_RATE ?? "0.01");
+  if (Math.random() < (Number.isFinite(rate) ? rate : 0.01)) {
+    await purgeOldVisitorData();
+  }
 }
+
+/** Masa simpan data pengunjung. Statistik dashboard hanya memakai data terbaru. */
+export const VISITOR_RETENTION_DAYS = 90;
+
+/** Hapus kunjungan dan pengunjung yang tidak aktif lebih dari masa simpan. */
+export async function purgeOldVisitorData(): Promise<void> {
+  const sql = getSql();
+  await sql`DELETE FROM page_views WHERE created_at < NOW() - make_interval(days => ${VISITOR_RETENTION_DAYS})`;
+  await sql`DELETE FROM visitors WHERE last_seen_at < NOW() - make_interval(days => ${VISITOR_RETENTION_DAYS})`;
+}
+

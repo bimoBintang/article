@@ -1,4 +1,9 @@
 import { query, queryOne } from "./db";
+import {
+  DEFAULT_HERO_TEMPLATE,
+  isHeroTemplateId,
+  type HeroTemplateId,
+} from "./hero-templates";
 
 /**
  * Pengaturan tampilan aplikasi.
@@ -90,4 +95,35 @@ export async function getSetting(
     [key]
   );
   return toBool(row?.value, DEFAULT_SETTINGS[key]);
+}
+
+/** Kunci pengaturan template hero (disimpan sebagai teks id template). */
+const HERO_TEMPLATE_KEY = "hero_visual_template";
+
+/**
+ * Template hero yang aktif. Jatuh ke bawaan bila belum pernah dipilih,
+ * nilainya tidak dikenal (mis. template sudah dihapus dari kode), atau
+ * database belum siap, supaya beranda tidak pernah rusak karena ini.
+ */
+export async function getHeroTemplate(): Promise<HeroTemplateId> {
+  try {
+    const row = await queryOne<{ value: string | null }>(
+      `SELECT value FROM settings WHERE key = $1`,
+      [HERO_TEMPLATE_KEY]
+    );
+    return isHeroTemplateId(row?.value) ? row.value : DEFAULT_HERO_TEMPLATE;
+  } catch {
+    return DEFAULT_HERO_TEMPLATE;
+  }
+}
+
+/** Simpan (upsert) template hero yang dipilih admin. */
+export async function setHeroTemplate(id: HeroTemplateId): Promise<void> {
+  await query(
+    `INSERT INTO settings (key, value, updated_at)
+     VALUES ($1, $2, NOW())
+     ON CONFLICT (key) DO UPDATE
+       SET value = EXCLUDED.value, updated_at = NOW()`,
+    [HERO_TEMPLATE_KEY, id]
+  );
 }

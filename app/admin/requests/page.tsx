@@ -8,8 +8,9 @@ import {
 } from "@/components/admin/table-preview";
 import Link from "next/link";
 import { ChevronRight } from "lucide-react";
-import { query } from "@/lib/db";
 import { Alert } from "@/components/ui/alert";
+import { useDebouncedValue } from "@/lib/use-debounced-value";
+import { STATUS_COLORS } from "@/lib/request-status";
 import { SkeletonPageHeader, SkeletonTable } from "@/components/ui/skeleton";
 
 export default function AdminRequests() {
@@ -17,26 +18,16 @@ export default function AdminRequests() {
   const { preview, openPreview, closePreview } = useTablePreview();
   const [requests, setRequests] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
   const [statusFilter, setStatusFilter] = useState("ALL");
   const [search, setSearch] = useState("");
-
-  const statusColors: Record<string, string> = {
-    DRAFT: "bg-zinc-100 text-zinc-700",
-    SUBMITTED: "bg-amber-50 text-amber-700 border-amber-200",
-    IN_REVIEW: "bg-blue-50 text-blue-700 border-blue-200",
-    NEGOTIATION: "bg-orange-50 text-orange-700 border-orange-200",
-    AGREED: "bg-indigo-50 text-indigo-700 border-indigo-200",
-    INVOICED: "bg-purple-50 text-purple-700 border-purple-200",
-    PAID: "bg-green-50 text-green-700 border-green-200",
-    SCHEDULED: "bg-indigo-50 text-indigo-700 border-indigo-200",
-    COMPLETED: "bg-emerald-50 text-emerald-700 border-emerald-200",
-    CANCELLED: "bg-red-50 text-red-700 border-red-200",
-    EXPIRED: "bg-gray-50 text-gray-700 border-gray-200",
-  };
+  const debouncedSearch = useDebouncedValue(search);
 
   useEffect(() => {
-    loadRequests();
-  }, [statusFilter, search]);
+    const controller = new AbortController();
+    loadRequests(controller.signal);
+    return () => controller.abort();
+  }, [statusFilter, debouncedSearch]);
 
   function previewRequest(r: any) {
     openPreview({
@@ -64,32 +55,29 @@ export default function AdminRequests() {
     });
   }
 
-  async function loadRequests() {
+  async function loadRequests(signal?: AbortSignal) {
     try {
-      let sql = `
-        SELECT r.*, COUNT(ri.id) as item_count
-        FROM requests r
-        LEFT JOIN request_items ri ON ri.request_id = r.id
-        WHERE 1=1
-      `;
-      const params: any[] = [];
+      const params = new URLSearchParams();
+      if (statusFilter !== "ALL") params.set("status", statusFilter);
+      if (debouncedSearch.trim()) params.set("search", debouncedSearch.trim());
 
-      if (statusFilter !== "ALL") {
-        params.push(statusFilter);
-        sql += ` AND r.status = $${params.length}`;
+      const res = await fetch(`/api/requests?${params}`, { signal });
+      if (res.status === 401) {
+        throw new Error("Sesi admin berakhir. Silakan masuk kembali.");
+      }
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Gagal memuat permintaan");
       }
 
-      if (search) {
-        params.push(`%${search}%`);
-        sql += ` AND (r.number ILIKE $${params.length} OR r.customer_name ILIKE $${params.length} OR r.customer_email ILIKE $${params.length})`;
-      }
-
-      sql += ` GROUP BY r.id ORDER BY r.created_at DESC`;
-
-      const rows = await query<any>(sql, params);
-      setRequests(rows);
-    } catch {
+      const data = await res.json();
+      setRequests(data.requests ?? []);
+      setError("");
+    } catch (err) {
+      // Permintaan lama dibatalkan karena filter berubah: abaikan
+      if (err instanceof DOMException && err.name === "AbortError") return;
       setRequests([]);
+      setError(err instanceof Error ? err.message : "Gagal memuat permintaan");
     } finally {
       setLoading(false);
     }
@@ -120,7 +108,6 @@ export default function AdminRequests() {
   }
 
   const statusOrder: string[] = ["SUBMITTED", "IN_REVIEW", "NEGOTIATION", "AGREED", "INVOICED", "PAID", "SCHEDULED", "COMPLETED"];
-  const filtered = requests.filter((r) => statusFilter === "ALL" || r.status === statusFilter);
 
   return (
     <div className="space-y-6">
@@ -149,7 +136,11 @@ export default function AdminRequests() {
         </div>
       </div>
 
-      {filtered.length > 0 ? (
+      {error ? (
+        <Alert variant="error" title="Gagal memuat data">
+          {error}
+        </Alert>
+      ) : requests.length > 0 ? (
         <div className="overflow-x-auto rounded-xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
           <table className="w-full min-w-[820px] text-left">
             <thead>
@@ -163,7 +154,7 @@ export default function AdminRequests() {
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
-              {filtered.map((r) => (
+              {requests.map((r) => (
                 <tr
                   key={r.id}
                   onDoubleClick={() => previewRequest(r)}
@@ -171,6 +162,11 @@ export default function AdminRequests() {
                 >
                   <td className="px-4 py-4 sm:px-6">
                     <div className="font-mono font-medium text-sm text-foreground">{r.number}</div>
+                    {r.request_type === "CUSTOM" && (
+                      <span className="mt-1 inline-block rounded bg-zinc-100 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+                        Customize
+                      </span>
+                    )}
                   </td>
                   <td className="px-4 py-4 sm:px-6">
                     <div className="font-medium text-sm text-foreground">{r.customer_name}</div>
@@ -180,7 +176,7 @@ export default function AdminRequests() {
                     {new Date(r.created_at).toLocaleDateString("id-ID")}
                   </td>
                   <td className="px-4 py-4 sm:px-6">
-                    <span className={`px-2 py-1 rounded-full text-xs font-medium border ${statusColors[r.status] || "bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300"}`}>
+                    <span className={`px-2 py-1 rounded-full text-xs font-medium border ${STATUS_COLORS[r.status] || "bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300"}`}>
                       {r.status}
                     </span>
                   </td>

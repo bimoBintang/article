@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { query, queryOne } from "@/lib/db";
 import { isAdmin } from "@/lib/auth-server";
+import { revalidatePublic } from "@/lib/revalidate";
 
 const talentSchema = z.object({
   name: z.string().min(1, "Nama wajib diisi"),
@@ -80,6 +81,8 @@ export async function POST(req: Request) {
         is_available ?? true,
       ]
     );
+
+    revalidatePublic();
 
     return NextResponse.json({ talent: rows }, { status: 201 });
   } catch (err) {

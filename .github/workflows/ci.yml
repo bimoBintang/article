@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      # Masih ada utang lint lama (any, set-state-in-effect); jangan blokir PR sampai dibereskan
+      - run: npm run lint
+        continue-on-error: true
+      # Build tidak butuh database: halaman ISR jatuh ke data kosong lalu diperbarui saat server jalan
+      - run: npm run build
+        env:
+          DATABASE_URL: postgresql://user:pass@localhost/db
+          SESSION_PASSWORD: ci-only-session-password-32-characters-long
+          PII_ENCRYPTION_KEY: ci-only-pii-encryption-key-0123456789

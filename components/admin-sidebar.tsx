@@ -8,13 +8,18 @@ import {
   Package,
   Users,
   Mail,
+  MailCheck,
+  Wallet,
   CreditCard,
   BarChart3,
   Settings2,
+  Quote,
+  LayoutTemplate,
   LogOut,
   Menu,
   X,
 } from "lucide-react";
+import { ThemeToggle } from "@/components/admin/theme-toggle";
 
 const navItems = [
   { label: "Dashboard", href: "/admin/dashboard", icon: LayoutDashboard },
@@ -22,6 +27,10 @@ const navItems = [
   { label: "Model", href: "/admin/models", icon: Users },
   { label: "Permintaan", href: "/admin/requests", icon: Mail },
   { label: "Invoice", href: "/admin/invoices", icon: CreditCard },
+  { label: "Testimoni", href: "/admin/testimonials", icon: Quote },
+  { label: "Tampilan Hero", href: "/admin/hero", icon: LayoutTemplate },
+  { label: "Email", href: "/admin/email", icon: MailCheck },
+  { label: "Midtrans", href: "/admin/midtrans", icon: Wallet },
   { label: "Visitor", href: "/admin/visitors", icon: BarChart3 },
   { label: "Pengaturan", href: "/admin/settings", icon: Settings2 },
 ];
@@ -97,8 +106,12 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
           })}
         </nav>
 
-        {/* Logout */}
-        <div className="shrink-0 border-t border-zinc-200 p-3 dark:border-zinc-800">
+        {/* Tema + logout */}
+        <div className="shrink-0 space-y-1 border-t border-zinc-200 p-3 dark:border-zinc-800">
+          <ThemeToggle
+            withLabel
+            className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-900 disabled:opacity-60 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-white"
+          />
           <button
             onClick={() => {
               fetch("/api/auth/logout", { method: "POST" }).then(() => {
@@ -124,9 +137,10 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
           >
             <Menu className="h-5 w-5" />
           </button>
-          <span className="truncate text-sm font-semibold text-foreground">
+          <span className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground">
             {current?.label || "Admin"}
           </span>
+          <ThemeToggle className="-mr-1 rounded p-1.5 text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 disabled:opacity-60 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-white" />
         </header>
 
         <main className="px-4 py-6 sm:px-6 lg:px-8 lg:py-8">{children}</main>

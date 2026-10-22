@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { query, queryOne } from "@/lib/db";
 import { isAdmin } from "@/lib/auth-server";
+import { revalidatePublic } from "@/lib/revalidate";
 
 const modelAssetSchema = z.object({
   file_url: z.string().min(1, "URL file 3D wajib diisi"),
@@ -80,6 +81,8 @@ export async function POST(req: Request, { params }: Ctx) {
       [id, file_url, poster_url || null, size_bytes || null, optimization_status]
     );
 
+    revalidatePublic();
+
     return NextResponse.json({ asset }, { status: 201 });
   } catch (err) {
     console.error("Create model asset error:", err);
@@ -106,6 +109,8 @@ export async function DELETE(req: Request, { params }: Ctx) {
     } else {
       await query(`DELETE FROM model_assets WHERE product_id = $1`, [id]);
     }
+
+    revalidatePublic();
 
     return NextResponse.json({ success: true });
   } catch (err) {

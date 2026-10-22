@@ -42,7 +42,9 @@ const s3 = new S3Client({
  */
 export async function getUploadUrl(
   fileName: string,
-  contentType: string
+  contentType: string,
+  /** Bila diisi, ukuran ikut ditandatangani sehingga PUT dengan ukuran lain ditolak storage. */
+  contentLength?: number
 ): Promise<string> {
   if (!endpoint || !accessKey || !secretKey) {
     throw new Error(
@@ -55,6 +57,7 @@ export async function getUploadUrl(
     Bucket: bucket,
     Key: fileName,
     ContentType: contentType,
+    ...(contentLength !== undefined ? { ContentLength: contentLength } : {}),
   });
 
   const url = await getSignedUrl(s3, command, { expiresIn: 300 }); // 5 menit

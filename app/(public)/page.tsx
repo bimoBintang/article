@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { query } from "@/lib/db";
-import { getSettings } from "@/lib/settings";
+import { getHeroTemplate, getSettings } from "@/lib/settings";
 import { HeroVisual, type HomeProduct } from "@/components/home/hero-visual";
 import { HomeProductCard } from "@/components/home/product-card";
 import { EmptyCollection } from "@/components/home/empty-collection";
@@ -9,11 +9,13 @@ import { Reveal } from "@/components/home/reveal";
 import {
   HowItWorks,
   Features,
+  Testimonials,
   CtaBand,
   Kicker,
 } from "@/components/home/sections";
 import { JsonLd } from "@/components/seo/json-ld";
 import { organizationSchema } from "@/lib/seo-schema";
+import type { Testimonial } from "@/types";
 import {
   absoluteUrl,
   OG_IMAGE_HEIGHT,
@@ -26,7 +28,8 @@ import {
   SITE_TAGLINE,
 } from "@/lib/seo";
 
-export const dynamic = "force-dynamic";
+// ISR: di-cache 60 detik; perubahan admin memanggil revalidatePublic() (lib/revalidate.ts) agar langsung terlihat
+export const revalidate = 60;
 
 const PAGE_TITLE = "Booking Foto Produk Fashion UMKM dengan Preview 3D 360°";
 
@@ -73,7 +76,7 @@ async function getFeaturedProducts(): Promise<HomeProduct[]> {
        FROM products
        WHERE is_published = true
        ORDER BY created_at DESC
-       LIMIT 8`
+       LIMIT 12`
     );
   } catch {
     return [];
@@ -107,18 +110,39 @@ async function getProductsWith3d(): Promise<string[]> {
   }
 }
 
-export default async function Home() {
-  const [products, stats, ids3d, settings] = await Promise.all([
-    getFeaturedProducts(),
-    getStats(),
-    getProductsWith3d(),
-    getSettings(),
-  ]);
+/** Testimoni terbit untuk marquee; kosong bila tabel belum ada atau belum diisi. */
+async function getTestimonials(): Promise<
+  Pick<Testimonial, "id" | "quote" | "name" | "title">[]
+> {
+  try {
+    return await query<Pick<Testimonial, "id" | "quote" | "name" | "title">>(
+      `SELECT id, quote, name, title
+       FROM testimonials
+       WHERE is_published = true
+       ORDER BY sort_order ASC, created_at ASC
+       LIMIT 20`
+    );
+  } catch {
+    return [];
+  }
+}
 
-  // Hero memakai 4 produk terbaru; daftar koleksi memakai 4 berikutnya
-  // agar tidak berulang. Bila katalog masih sedikit, pakai yang ada.
-  const heroProducts = products.slice(0, 4);
-  const rest = products.slice(4);
+export default async function Home() {
+  const [products, stats, ids3d, settings, testimonials, heroTemplate] =
+    await Promise.all([
+      getFeaturedProducts(),
+      getStats(),
+      getProductsWith3d(),
+      getSettings(),
+      getTestimonials(),
+      getHeroTemplate(),
+    ]);
+
+  // Hero memakai 7 produk terbaru (1 di piring tengah + 6 di orbit); daftar
+  // koleksi memakai berikutnya agar tidak berulang. Bila katalog masih
+  // sedikit, pakai yang ada.
+  const heroProducts = products.slice(0, 7);
+  const rest = products.slice(7);
   const featured = rest.length >= 2 ? rest.slice(0, 4) : products.slice(0, 4);
   const with3d = new Set(ids3d);
 
@@ -143,7 +167,7 @@ export default async function Home() {
             </div>
 
             <h1
-              className="animate-rise mt-6 font-display font-extrabold text-[2.75rem] leading-[0.98] tracking-[-0.03em] [word-spacing:0.06em] text-ink sm:text-6xl lg:text-7xl"
+              className="animate-rise mt-6 font-display font-extrabold text-[2.15rem] leading-[0.98] tracking-[-0.03em] [word-spacing:0.06em] text-ink sm:text-6xl lg:text-7xl"
               style={{ animationDelay: "60ms" }}
             >
               Foto produk yang membuat brand Anda terlihat{" "}
@@ -177,7 +201,7 @@ export default async function Home() {
               </Link>
             </div>
 
-            {statItems.length > 0 && (
+            {/* {statItems.length > 0 && (
               <dl
                 className="animate-rise mt-16 grid max-w-md grid-cols-3 gap-6 border-t border-line pt-6"
                 style={{ animationDelay: "240ms" }}
@@ -192,14 +216,14 @@ export default async function Home() {
                   </div>
                 ))}
               </dl>
-            )}
+            )} */}
           </div>
 
           <div
             className="animate-rise lg:col-span-6"
             style={{ animationDelay: "120ms" }}
           >
-            <HeroVisual products={heroProducts} />
+            <HeroVisual products={heroProducts} template={heroTemplate} />
           </div>
         </div>
       </section>
@@ -207,7 +231,7 @@ export default async function Home() {
       {/* ===================== KOLEKSI TERBARU ===================== */}
       <section
         id="produk-unggulan"
-        className="scroll-mt-24 border-t border-line py-24 sm:py-32"
+        className="scroll-mt-24 border-t border-line py-16 sm:py-32"
       >
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
           {featured.length > 0 ? (
@@ -215,7 +239,7 @@ export default async function Home() {
               <Reveal className="flex flex-col gap-6 sm:flex-row sm:items-end sm:justify-between">
                 <div>
                   <Kicker>Koleksi terbaru</Kicker>
-                  <h2 className="mt-4 font-display font-extrabold text-4xl leading-[1] tracking-[-0.03em] [word-spacing:0.06em] text-ink sm:text-5xl">
+                  <h2 className="mt-4 font-display font-extrabold text-2xl leading-none tracking-[-0.03em] [word-spacing:0.06em] text-ink sm:text-5xl">
                     Baru masuk katalog
                   </h2>
                 </div>
@@ -227,9 +251,14 @@ export default async function Home() {
                 </Link>
               </Reveal>
 
-              <div className="mt-14 grid grid-cols-2 gap-x-4 gap-y-12 sm:gap-x-6 lg:grid-cols-4">
+              {/* 3 kolom di mobile (produk ke-4 disembunyikan agar baris penuh), 2 di tablet, 4 di desktop */}
+              <div className="mt-10 grid grid-cols-3 gap-x-2 gap-y-8 sm:mt-14 sm:grid-cols-2 sm:gap-x-6 sm:gap-y-12 lg:grid-cols-4">
                 {featured.map((product, i) => (
-                  <Reveal key={product.id} delay={i * 0.06}>
+                  <Reveal
+                    key={product.id}
+                    delay={i * 0.06}
+                    className={i >= 3 ? "hidden sm:block" : undefined}
+                  >
                     <HomeProductCard
                       product={product}
                       has3d={with3d.has(product.id)}
@@ -250,6 +279,7 @@ export default async function Home() {
 
       <HowItWorks />
       <Features />
+      <Testimonials items={testimonials} />
       <CtaBand />
     </>
   );

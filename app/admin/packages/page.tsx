@@ -17,7 +17,6 @@ type Package = {
   description: string | null;
   base_price: number;
   look_count: number | null;
-  duration_minutes: number | null;
   photo_count: number | null;
   is_active: boolean;
 };
@@ -35,7 +34,6 @@ export default function AdminPackages() {
     description: "",
     base_price: "0",
     look_count: "",
-    duration_minutes: "",
     photo_count: "",
     is_active: true,
   });
@@ -57,10 +55,6 @@ export default function AdminPackages() {
         },
         { label: "Look", value: pkg.look_count ?? "-" },
         { label: "Foto", value: pkg.photo_count ?? "-" },
-        {
-          label: "Durasi",
-          value: pkg.duration_minutes ? `${pkg.duration_minutes} menit` : "-",
-        },
         { label: "Status", value: pkg.is_active ? "Aktif" : "Tidak Aktif" },
       ],
     });
@@ -103,7 +97,6 @@ export default function AdminPackages() {
         description: form.description || null,
         base_price: form.base_price ? parseInt(form.base_price) : 0,
         look_count: form.look_count ? parseInt(form.look_count) : null,
-        duration_minutes: form.duration_minutes ? parseInt(form.duration_minutes) : null,
         photo_count: form.photo_count ? parseInt(form.photo_count) : null,
         is_active: form.is_active,
       }),
@@ -118,7 +111,7 @@ export default function AdminPackages() {
     setEditingId(null);
     setForm({
       name: "", description: "", base_price: "0", look_count: "",
-      duration_minutes: "", photo_count: "", is_active: true,
+      photo_count: "", is_active: true,
     });
     setSuccess("Paket berhasil ditambahkan");
     setTimeout(() => setSuccess(""), 4000);
@@ -135,7 +128,6 @@ export default function AdminPackages() {
         description: form.description || null,
         base_price: form.base_price ? parseInt(form.base_price) : 0,
         look_count: form.look_count ? parseInt(form.look_count) : null,
-        duration_minutes: form.duration_minutes ? parseInt(form.duration_minutes) : null,
         photo_count: form.photo_count ? parseInt(form.photo_count) : null,
         is_active: form.is_active,
       }),
@@ -192,7 +184,7 @@ export default function AdminPackages() {
           onClick={() => {
             setForm({
               name: "", description: "", base_price: "0", look_count: "",
-              duration_minutes: "", photo_count: "", is_active: true,
+              photo_count: "", is_active: true,
             });
             setEditingId(null);
             setOpen(true);
@@ -244,7 +236,6 @@ export default function AdminPackages() {
                           description: p.description || "",
                           base_price: p.base_price?.toString() || "0",
                           look_count: p.look_count?.toString() || "",
-                          duration_minutes: p.duration_minutes?.toString() || "",
                           photo_count: p.photo_count?.toString() || "",
                           is_active: p.is_active,
                         });
@@ -319,10 +310,6 @@ export default function AdminPackages() {
                 <label className="block text-sm font-medium mb-1 text-zinc-700 dark:text-zinc-300">Foto Hasil</label>
                 <input type="number" value={form.photo_count} onChange={(e) => setForm({...form, photo_count: e.target.value})} className="w-full px-3 py-2 border border-zinc-300 dark:border-zinc-700 rounded-lg focus:ring-2 focus:ring-primary focus:outline-none bg-white dark:bg-zinc-900 text-foreground" />
               </div>
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-1 text-zinc-700 dark:text-zinc-300">Durasi (menit)</label>
-              <input type="number" value={form.duration_minutes} onChange={(e) => setForm({...form, duration_minutes: e.target.value})} className="w-full px-3 py-2 border border-zinc-300 dark:border-zinc-700 rounded-lg focus:ring-2 focus:ring-primary focus:outline-none bg-white dark:bg-zinc-900 text-foreground" />
             </div>
             <div className="flex items-center gap-2">
               <input type="checkbox" checked={form.is_active} onChange={(e) => setForm({...form, is_active: e.target.checked})} />

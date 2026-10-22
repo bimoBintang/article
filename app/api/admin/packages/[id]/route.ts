@@ -2,13 +2,13 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { query, queryOne } from "@/lib/db";
 import { isAdmin } from "@/lib/auth-server";
+import { revalidatePublic } from "@/lib/revalidate";
 
 const packageSchema = z.object({
   name: z.string().min(1, "Nama wajib diisi").optional(),
   description: z.string().nullable().optional(),
   base_price: z.coerce.number().int().nonnegative().optional(),
   look_count: z.coerce.number().int().positive().nullable().optional(),
-  duration_minutes: z.coerce.number().int().positive().nullable().optional(),
   photo_count: z.coerce.number().int().positive().nullable().optional(),
   is_active: z.boolean().optional(),
 });
@@ -75,6 +75,8 @@ export async function PUT(
 
     const rows = await queryOne<any>(sql, values);
 
+    revalidatePublic();
+
     return NextResponse.json({ package: rows });
   } catch (err) {
     console.error("Update package error:", err);
@@ -95,6 +97,8 @@ export async function DELETE(
     const { id } = await params;
 
     await query(`DELETE FROM packages WHERE id = $1`, [id]);
+
+    revalidatePublic();
 
     return NextResponse.json({ success: true });
   } catch (err) {

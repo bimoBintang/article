@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { query, queryOne } from "@/lib/db";
 import { isAdmin } from "@/lib/auth-server";
+import { revalidatePublic } from "@/lib/revalidate";
 
 const imageSchema = z.object({
   image_url: z.string().min(1, "URL foto wajib diisi"),
@@ -81,6 +82,8 @@ export async function POST(req: Request, { params }: Ctx) {
       [id, image_url, alt_text || null, order]
     );
 
+    revalidatePublic();
+
     return NextResponse.json({ image }, { status: 201 });
   } catch (err) {
     console.error("Create product image error:", err);
@@ -123,6 +126,8 @@ export async function PUT(req: Request, { params }: Ctx) {
       );
     }
 
+    revalidatePublic();
+
     return NextResponse.json({ success: true });
   } catch (err) {
     console.error("Reorder product images error:", err);
@@ -149,6 +154,8 @@ export async function DELETE(req: Request, { params }: Ctx) {
     } else {
       await query(`DELETE FROM product_images WHERE product_id = $1`, [id]);
     }
+
+    revalidatePublic();
 
     return NextResponse.json({ success: true });
   } catch (err) {

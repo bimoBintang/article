@@ -15,7 +15,8 @@ import {
   SITE_TAGLINE,
 } from "@/lib/seo";
 
-export const dynamic = "force-dynamic";
+// ISR: di-cache 60 detik; perubahan admin memanggil revalidatePublic() (lib/revalidate.ts) agar langsung terlihat
+export const revalidate = 60;
 
 const PAGE_TITLE = "Katalog Produk Fashion UMKM — Preview 3D 360°";
 

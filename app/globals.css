@@ -119,12 +119,72 @@ body {
   }
 }
 
+/*
+ * Marquee tak berujung (Infinite Moving Cards): track berisi dua salinan
+ * daftar kartu, lalu digeser tepat setengah lebar sehingga ujung salinan
+ * pertama bertemu awal salinan kedua tanpa lompatan.
+ * Durasi dan arah diatur lewat --marquee-duration dan --marquee-direction.
+ */
+@keyframes ek-marquee {
+  to {
+    transform: translateX(-50%);
+  }
+}
+
 @utility animate-rise {
   animation: ek-rise 0.7s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
+@utility animate-marquee {
+  animation: ek-marquee var(--marquee-duration, 45s) linear infinite
+    var(--marquee-direction, normal);
+}
+
+/*
+ * Orbit foto di hero: cincin berputar searah jarum jam, sementara tiap
+ * kartu berputar balik dengan durasi yang sama sehingga foto tetap tegak.
+ * Keduanya harus memakai --orbit-duration yang sama agar selalu sinkron.
+ */
+@keyframes ek-orbit {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes ek-orbit-counter {
+  to {
+    transform: rotate(-360deg);
+  }
+}
+
+@utility animate-orbit {
+  animation: ek-orbit var(--orbit-duration, 60s) linear infinite;
+}
+
+@utility animate-orbit-counter {
+  animation: ek-orbit-counter var(--orbit-duration, 60s) linear infinite;
+}
+
+/*
+ * Putaran pada sumbu vertikal (Y) untuk kartu dan kolom 3D di hero.
+ * Durasi lewat --spin-duration; fase awal tiap kartu lewat animation-delay negatif.
+ */
+@keyframes ek-spin-y {
+  to {
+    transform: rotateY(360deg);
+  }
+}
+
+@utility animate-spin-y {
+  animation: ek-spin-y var(--spin-duration, 24s) linear infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .animate-rise {
+  .animate-rise,
+  .animate-marquee,
+  .animate-orbit,
+  .animate-orbit-counter,
+  .animate-spin-y {
     animation: none !important;
   }
 }

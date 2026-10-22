@@ -38,29 +38,101 @@ export type UploadResult = {
  * >30 detik). Selain merusak UX, image optimizer Next.js punya batas
  * 7 detik untuk ambil file asal sehingga gambar besar gagal dimuat
  * (504). Solusinya: perkecil + kompres gambar di browser SEBELUM
- * diunggah, sehingga file yang tersimpan ringan (<= ~300 KB).
+ * diunggah, sehingga file yang tersimpan ringan (<= ~700 KB). Kualitas dijaga setinggi
+ * mungkin di dalam anggaran itu; gambar yang sudah ringan tidak dikompres ulang.
  * ------------------------------------------------------------------ */
 
-/** Dimensi maksimal sisi gambar (px). Cukup untuk foto produk & lightbox. */
-export const IMAGE_MAX_DIMENSION = 1600;
-/** Kualitas kompresi WebP (0-1). */
-export const IMAGE_QUALITY = 0.82;
-/** Bila file sudah kecil & dimensinya wajar, tidak perlu dikompresi lagi. */
-const IMAGE_SKIP_BYTES = 250 * 1024;
+/** Dimensi maksimal sisi gambar (px). Cukup tajam untuk zoom/lightbox di layar retina. */
+export const IMAGE_MAX_DIMENSION = 2400;
+/**
+ * Anggaran ukuran file hasil. Object storage Neon lambat (terukur ~190 KB/detik saat
+ * unduh) dan image optimizer Next.js hanya menunggu ~7 detik untuk mengambil file asal:
+ * file 800 KB butuh ~5 detik, 1,4 MB sudah ~7,3 detik. Anggaran 700 KB menyisakan
+ * ruang aman; kualitas diturunkan hanya sejauh yang diperlukan agar muat.
+ */
+export const IMAGE_BYTE_BUDGET = 700 * 1024;
+/** Kualitas WebP tertinggi yang dicoba lebih dulu (0-1). */
+export const IMAGE_QUALITY = 0.92;
+
+/** Tangga kualitas: dimulai tinggi, turun hanya bila file belum muat anggaran. */
+const QUALITY_LADDER = [IMAGE_QUALITY, 0.88, 0.84, 0.8];
+/** Dimensi cadangan bila kualitas 0.8 pun belum muat anggaran. */
+const DIMENSION_FALLBACKS = [2000, 1600];
+/** Format yang cukup baik untuk dikirim apa adanya bila sudah ringan dan tidak berlebihan dimensinya. */
+const KEEP_AS_IS = /^image\/(jpeg|png|webp|avif)$/;
 
 type CompressOptions = {
   maxDimension?: number;
-  quality?: number;
+  byteBudget?: number;
 };
 
 /**
- * Perkecil dan kompres gambar di browser memakai Canvas.
- * Menghasilkan WebP (fallback JPEG bila WebP tidak didukung browser).
- * Bila browser tidak mendukung Canvas API, file asli dikembalikan.
+ * Apakah JPEG memuat segmen EXIF (kamera, orientasi, dan sering lokasi GPS)?
+ * File ber-EXIF selalu di-encode ulang agar metadata hilang dan orientasi tertanam.
+ */
+async function hasExif(file: File): Promise<boolean> {
+  if (file.type !== "image/jpeg") return false;
+  const view = new DataView(await file.slice(0, 256 * 1024).arrayBuffer());
+  if (view.byteLength < 4 || view.getUint16(0) !== 0xffd8) return false;
+
+  let offset = 2;
+  while (offset + 4 <= view.byteLength) {
+    if (view.getUint8(offset) !== 0xff) return false;
+    const marker = view.getUint8(offset + 1);
+    if (marker === 0xda || marker === 0xd9) return false; // data gambar dimulai; tidak ada EXIF lagi
+    // APP1 yang diawali "Exif"
+    if (marker === 0xe1 && offset + 8 <= view.byteLength && view.getUint32(offset + 4) === 0x45786966) {
+      return true;
+    }
+    offset += 2 + view.getUint16(offset + 2);
+  }
+  return false;
+}
+
+/**
+ * Perkecil ke ukuran target dengan kualitas tinggi. Skala turun besar dilakukan
+ * bertahap (dibagi dua berulang) karena satu langkah besar membuat tepi bergerigi.
+ */
+function drawScaled(bitmap: ImageBitmap, targetW: number, targetH: number): HTMLCanvasElement | null {
+  let source: CanvasImageSource = bitmap;
+  let w = bitmap.width;
+  let h = bitmap.height;
+
+  const step = (toW: number, toH: number) => {
+    const canvas = document.createElement("canvas");
+    canvas.width = toW;
+    canvas.height = toH;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(source, 0, 0, toW, toH);
+    return canvas;
+  };
+
+  while (w / 2 >= targetW && h / 2 >= targetH) {
+    const half = step(Math.round(w / 2), Math.round(h / 2));
+    if (!half) return null;
+    source = half;
+    w = half.width;
+    h = half.height;
+  }
+  return step(targetW, targetH);
+}
+
+/**
+ * Siapkan gambar untuk diunggah dengan kehilangan kualitas sekecil mungkin.
+ *
+ * 1. Gambar yang sudah ringan (<= anggaran), tidak berlebihan dimensinya, dan tanpa EXIF
+ *    dikirim APA ADANYA: tidak ada kompres ulang, jadi tidak ada penurunan kualitas.
+ * 2. Selain itu di-encode ke WebP. PNG (poster, teks, grafis) dicoba lossless dulu;
+ *    sisanya kualitas 0.92 dan baru diturunkan bertahap bila belum muat anggaran,
+ *    lalu dimensi diturunkan sebagai cadangan terakhir.
+ * Bila browser tidak mendukung Canvas/encode, file asli dikembalikan.
  */
 export async function compressImage(
   file: File,
-  { maxDimension = IMAGE_MAX_DIMENSION, quality = IMAGE_QUALITY }: CompressOptions = {}
+  { maxDimension = IMAGE_MAX_DIMENSION, byteBudget = IMAGE_BYTE_BUDGET }: CompressOptions = {}
 ): Promise<File> {
   // bukan gambar -> biarkan apa adanya
   if (!file.type.startsWith("image/")) return file;
@@ -76,59 +148,74 @@ export async function compressImage(
   }
 
   const { width, height } = bitmap;
-  const scale = Math.min(1, maxDimension / Math.max(width, height));
-  const targetW = Math.max(1, Math.round(width * scale));
-  const targetH = Math.max(1, Math.round(height * scale));
-
-  // Sudah WebP dan ukurannya sudah ringan -> tidak perlu di-encode ulang.
-  // File JPG/JPEG/PNG SELALU dikonversi ke WebP, berapa pun ukurannya,
-  // supaya format di object storage konsisten.
-  const isWebp =
-    file.type === "image/webp" || /\.webp$/i.test(file.name || "");
-  if (isWebp && file.size <= IMAGE_SKIP_BYTES && scale === 1) {
-    bitmap.close();
-    return file;
-  }
+  const longest = Math.max(width, height);
 
   try {
-    const canvas = document.createElement("canvas");
-    canvas.width = targetW;
-    canvas.height = targetH;
-
-    const ctx = canvas.getContext("2d");
-    if (!ctx) {
-      bitmap.close();
+    if (
+      longest <= maxDimension &&
+      file.size <= byteBudget &&
+      KEEP_AS_IS.test(file.type) &&
+      !(await hasExif(file))
+    ) {
       return file;
     }
 
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = "high";
-    ctx.drawImage(bitmap, 0, 0, targetW, targetH);
-    bitmap.close();
+    // Dimensi yang dicoba berurutan: sedekat mungkin dengan aslinya, lalu cadangan lebih kecil
+    const firstDimension = Math.min(longest, maxDimension);
+    const dimensions = [firstDimension, ...DIMENSION_FALLBACKS.filter((d) => d < firstDimension)];
+    const isPng = file.type === "image/png";
 
-    const blob = await canvasToBlob(canvas, quality);
-    if (!blob) return file;
+    let smallest: Blob | null = null;
+    for (const [index, dimension] of dimensions.entries()) {
+      const scale = dimension / longest;
+      const canvas = drawScaled(
+        bitmap,
+        Math.max(1, Math.round(width * scale)),
+        Math.max(1, Math.round(height * scale))
+      );
+      if (!canvas) return file;
 
-    const newName = file.name.replace(/\.[^.]+$/, "") + "." + extFromMime(blob.type);
-    return new File([blob], newName, {
-      type: blob.type,
-      lastModified: Date.now(),
-    });
+      // Grafis/teks: WebP lossless (kualitas 1) mempertahankan setiap piksel
+      if (isPng && index === 0) {
+        const lossless = await canvasToBlob(canvas, 1, "image/webp");
+        if (lossless && lossless.type === "image/webp" && lossless.size <= byteBudget) {
+          return toFile(lossless, file);
+        }
+      }
+
+      for (const quality of QUALITY_LADDER) {
+        const blob = await canvasToBlob(canvas, quality);
+        if (!blob) return file;
+        if (!smallest || blob.size < smallest.size) smallest = blob;
+        if (blob.size <= byteBudget) return toFile(blob, file);
+      }
+    }
+
+    return smallest ? toFile(smallest, file) : file;
   } catch {
     return file;
+  } finally {
+    bitmap.close();
   }
 }
 
-/** Konversi canvas menjadi Blob dengan WebP, fallback ke JPEG. */
+function toFile(blob: Blob, original: File): File {
+  const newName = original.name.replace(/\.[^.]+$/, "") + "." + extFromMime(blob.type);
+  return new File([blob], newName, { type: blob.type, lastModified: Date.now() });
+}
+
+/** Konversi canvas menjadi Blob WebP (atau tipe lain bila diminta), fallback ke JPEG bila WebP tidak didukung. */
 async function canvasToBlob(
   canvas: HTMLCanvasElement,
-  quality: number
+  quality: number,
+  type: "image/webp" | "image/jpeg" = "image/webp"
 ): Promise<Blob | null> {
-  const webp = await new Promise<Blob | null>((resolve) =>
-    canvas.toBlob((b) => resolve(b), "image/webp", quality)
+  const first = await new Promise<Blob | null>((resolve) =>
+    canvas.toBlob((b) => resolve(b), type, quality)
   );
-  // Browser lama tidak mendukung WebP -> toBlob mengembalikan null
-  if (webp && webp.type === "image/webp" && webp.size > 0) return webp;
+  // Browser lama tidak mendukung WebP -> toBlob mengembalikan PNG; pakai JPEG sebagai gantinya
+  if (first && first.type === type && first.size > 0) return first;
+  if (type === "image/webp" && quality === 1) return first; // lossless tidak tersedia: biarkan pemanggil memutuskan
 
   return await new Promise<Blob | null>((resolve) =>
     canvas.toBlob((b) => resolve(b), "image/jpeg", quality)
@@ -182,7 +269,8 @@ export async function uploadToStorage(
     throw new Error(errData.error || "Gagal generate upload URL");
   }
 
-  const { uploadUrl, publicUrl } = await res.json();
+  // Server menambah akhiran acak pada nama file; pakai nama yang dikembalikan
+  const { uploadUrl, publicUrl, fileName: storedName } = await res.json();
 
   // Step 2: upload langsung ke object storage
   const putRes = await fetch(uploadUrl, {
@@ -197,7 +285,7 @@ export async function uploadToStorage(
 
   return {
     url: publicUrl || uploadUrl,
-    fileName,
+    fileName: storedName ?? fileName,
     sizeBytes: outFile.size,
     contentType,
   };
@@ -256,4 +344,34 @@ export function pickFiles(accept: string): Promise<File[]> {
 
     input.click();
   });
+}
+
+/**
+ * Upload gambar referensi dari pengunjung lewat endpoint publik terbatas.
+ * Gambar dikompresi dulu; ukuran hasil kompresi itulah yang ditandatangani.
+ */
+export async function uploadPublicImage(file: File): Promise<string> {
+  let outFile = file;
+  try {
+    outFile = await compressImage(file);
+  } catch {
+    /* pakai file asli; server tetap membatasi tipe dan ukuran */
+  }
+  const contentType = outFile.type || resolveContentType(outFile);
+
+  const res = await fetch("/api/public/upload", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ contentType, size: outFile.size }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || "Gagal menyiapkan unggahan");
+
+  const putRes = await fetch(data.uploadUrl, {
+    method: "PUT",
+    body: outFile,
+    headers: { "Content-Type": contentType },
+  });
+  if (!putRes.ok) throw new Error(`Unggahan gagal (${putRes.status})`);
+  return data.publicUrl as string;
 }

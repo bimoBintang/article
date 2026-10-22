@@ -7,6 +7,7 @@ import {
 } from "@/components/admin/table-preview";
 import { Search, RefreshCw } from "lucide-react";
 import { Alert } from "@/components/ui/alert";
+import { useDebouncedValue } from "@/lib/use-debounced-value";
 import { Skeleton } from "@/components/ui/skeleton";
 
 type Visitor = {
@@ -51,10 +52,11 @@ export default function AdminVisitors() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
+  const debouncedSearch = useDebouncedValue(search);
 
   useEffect(() => {
     loadVisitors();
-  }, [search]);
+  }, [debouncedSearch]);
 
   function previewVisitor(v: Visitor) {
     openPreview({
@@ -64,7 +66,7 @@ export default function AdminVisitors() {
         { label: "Perangkat", value: v.device_type },
         { label: "Browser", value: v.browser },
         { label: "Sistem Operasi", value: v.os },
-        { label: "IP Address", value: v.ip_address || "-" },
+        { label: "IP (disamarkan)", value: v.ip_address || "-" },
         { label: "Halaman awal", value: v.landing_page || "-" },
         { label: "Referrer", value: v.referrer || "-" },
         { label: "Kunjungan", value: `${v.visit_count}×` },
@@ -81,7 +83,7 @@ export default function AdminVisitors() {
     try {
       setLoading(true);
       const res = await fetch(
-        `/api/admin/visitors?search=${encodeURIComponent(search)}`
+        `/api/admin/visitors?search=${encodeURIComponent(debouncedSearch)}`
       );
       if (!res.ok) throw new Error("Gagal memuat data visitor");
       const data = await res.json();
@@ -177,7 +179,7 @@ export default function AdminVisitors() {
                 "Visitor Key",
                 "Perangkat",
                 "Browser / OS",
-                "IP Address",
+                "IP (disamarkan)",
                 "Halaman Awal",
                 "Kunjungan",
                 "Terakhir Seen",

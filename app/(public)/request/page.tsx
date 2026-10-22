@@ -4,6 +4,26 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import { Check } from "lucide-react";
 import { z } from "zod";
+import type { Package } from "@/types";
+import type { PublicSettings } from "@/lib/settings";
+import {
+ EMPTY_MODEL_SELECTION,
+ ModelPicker,
+ type ModelSelection,
+} from "@/components/request/model-picker";
+import {
+ EMPTY_PACKAGE_SELECTION,
+ PackagePicker,
+ resolvePackageSelection,
+ type PackageSelection,
+} from "@/components/request/package-picker";
+import {
+ ReferencePicker,
+ type RefImage,
+} from "@/components/request/reference-picker";
+
+// CSP melarang eval: matikan kompilasi JIT zod supaya browser tidak mencatat pelanggaran dari pengecekan `new Function`
+z.config({ jitless: true });
 
 const requestSchema = z.object({
  name: z.string().min(2, "Nama minimal 2 karakter"),
@@ -47,6 +67,30 @@ export default function RequestPage() {
  const [requestNumber, setRequestNumber] = useState<string | null>(null);
  const [cart, setCart] = useState<any[]>([]);
 
+ // Opsi "Customize": brief sendiri + referensi + paket + model
+ const [mode, setMode] = useState<"template" | "custom">("template");
+ const [customTitle, setCustomTitle] = useState("");
+ const [customDesc, setCustomDesc] = useState("");
+ const [refImages, setRefImages] = useState<RefImage[]>([]);
+ const [refLinks, setRefLinks] = useState<string[]>([]);
+ const [pkgSel, setPkgSel] = useState<PackageSelection>(EMPTY_PACKAGE_SELECTION);
+ const [model, setModel] = useState<ModelSelection>(EMPTY_MODEL_SELECTION);
+ const [packages, setPackages] = useState<Package[]>([]);
+ const [pkgSettings, setPkgSettings] = useState<Pick<PublicSettings, "show_package_price">>({
+ show_package_price: true,
+ });
+
+ useEffect(() => {
+ fetch("/api/public/packages")
+ .then((r) => (r.ok ? r.json() : null))
+ .then((d) => d?.packages && setPackages(d.packages))
+ .catch(() => {});
+ fetch("/api/public/settings")
+ .then((r) => (r.ok ? r.json() : null))
+ .then((d) => d?.settings && setPkgSettings(d.settings))
+ .catch(() => {});
+ }, []);
+
  useEffect(() => {
  try {
  const saved = localStorage.getItem("ekatalog_cart");
@@ -55,6 +99,24 @@ export default function RequestPage() {
  setCart([]);
  }
  }, []);
+
+ // Validasi bagian Customize; dipanggil juga saat data kontak belum valid agar semua
+ // kesalahan tampil sekaligus.
+ const collectCustomErrors = () => {
+ const e: Record<string, string> = {};
+ if (customTitle.trim().length < 2) e.title = "Nama produk atau koleksi minimal 2 karakter";
+ if (customDesc.trim().length < 10) e.description = "Deskripsi kebutuhan minimal 10 karakter";
+ if (refImages.some((i) => i.status === "uploading")) {
+ e.references = "Tunggu hingga unggahan gambar selesai.";
+ } else if (refImages.some((i) => i.status === "error")) {
+ e.references = "Hapus gambar yang gagal diunggah terlebih dahulu.";
+ } else if (refImages.length + refLinks.length === 0) {
+ e.references = "Tambahkan minimal satu referensi: gambar atau tautan.";
+ }
+ const resolved = resolvePackageSelection(pkgSel);
+ if (!resolved.ok) e.package = resolved.error;
+ return { e, resolved };
+ };
 
  const handleSubmit = async (e: React.FormEvent) => {
  e.preventDefault();
@@ -73,6 +135,7 @@ export default function RequestPage() {
  fieldErrors[String(key)] = issue.message;
  }
  }
+ if (mode === "custom") Object.assign(fieldErrors, collectCustomErrors().e);
  setErrors(fieldErrors);
  setSubmitting(false);
  focusFirstError();
@@ -81,10 +144,36 @@ export default function RequestPage() {
 
  const validated = parsed.data;
 
+ let customBody: Record<string, unknown> | null = null;
+ if (mode === "custom") {
+ const { e, resolved } = collectCustomErrors();
+ if (Object.keys(e).length > 0 || !resolved.ok) {
+ setErrors((prev) => ({ ...prev, ...e }));
+ setSubmitting(false);
+ focusFirstError();
+ return;
+ }
+ customBody = {
+ title: customTitle.trim(),
+ description: customDesc.trim(),
+ images: refImages.map((i) => i.url),
+ links: refLinks,
+ packageId: resolved.packageId,
+ customLookCount: resolved.customLookCount,
+ customPhotoCount: resolved.customPhotoCount,
+ modelGender: model.gender,
+ modelNotes: model.notes.trim() || null,
+ };
+ }
+
  try {
  const cartItems = cart.map((item: any) => ({
  productId: item.productId ?? null,
  packageId: item.packageId ?? null,
+ customLookCount: item.customLookCount ?? null,
+ customPhotoCount: item.customPhotoCount ?? null,
+ modelGender: item.modelGender ?? null,
+ modelNotes: item.modelNotes ?? null,
  talentId: item.talentId ?? null,
  quantity: item.quantity ?? 1,
  }));
@@ -101,7 +190,7 @@ export default function RequestPage() {
  preferredDate: validated.preferredDate || null,
  notes: validated.notes || null,
  consent: validated.consent,
- items: cartItems,
+ ...(customBody ? { type: "CUSTOM", custom: customBody } : { items: cartItems }),
  }),
  });
 
@@ -110,7 +199,7 @@ export default function RequestPage() {
  if (!res.ok) {
  // Validasi server: tampilkan pesan pada field yang bermasalah
  if (res.status === 400 && result.field) {
- setErrors({ [result.field]: result.error || "Input tidak valid" });
+ setErrors({ [String(result.field).replace(/^custom\./, "")]: result.error || "Input tidak valid" });
  focusFirstError();
  return;
  }
@@ -139,7 +228,7 @@ export default function RequestPage() {
  const focusFirstError = () => {
  requestAnimationFrame(() => {
  const el = document.querySelector<HTMLElement>(
- '[aria-invalid="true"]'
+ '[aria-invalid="true"], [data-field-error]'
  );
  el?.focus();
  el?.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -198,7 +287,128 @@ export default function RequestPage() {
  mengirim konfirmasi ke email Anda.
  </p>
 
+ <div
+ role="tablist"
+ aria-label="Jenis permintaan"
+ className="mb-6 grid grid-cols-2 gap-2 rounded-lg bg-zinc-100 p-1"
+ >
+ {(
+ [
+ ["template", "Sesuai template produk"],
+ ["custom", "Customize"],
+ ] as const
+ ).map(([value, label]) => (
+ <button
+ key={value}
+ type="button"
+ role="tab"
+ aria-selected={mode === value}
+ onClick={() => {
+ setMode(value);
+ setErrors({});
+ }}
+ className={`rounded-md px-3 py-2 text-sm font-medium transition-colors ${
+ mode === value
+ ? "bg-white text-foreground shadow-sm"
+ : "text-zinc-500 hover:text-zinc-700"
+ }`}
+ >
+ {label}
+ </button>
+ ))}
+ </div>
+
+ {mode === "template" && cart.length === 0 && (
+ <p className="mb-6 rounded-lg bg-amber-50 p-3 text-sm text-amber-800">
+ Keranjang Anda masih kosong.{" "}
+ <Link href="/katalog" className="font-medium underline">
+ Pilih produk di katalog
+ </Link>{" "}
+ terlebih dahulu, atau gunakan tab Customize untuk brief sendiri.
+ </p>
+ )}
+
  <form onSubmit={handleSubmit} className="space-y-5" noValidate>
+ {mode === "custom" && (
+ <div className="space-y-5 rounded-lg border border-zinc-200 p-4">
+ <div>
+ <label htmlFor="custom-title" className="block text-sm font-medium text-zinc-700 mb-1">
+ Nama Produk / Koleksi
+ </label>
+ <input
+ id="custom-title"
+ type="text"
+ value={customTitle}
+ onChange={(e) => {
+ setCustomTitle(e.target.value);
+ clearError("title");
+ }}
+ aria-invalid={Boolean(errors.title)}
+ maxLength={120}
+ className={`w-full px-3 py-2 border rounded-lg bg-white text-zinc-900 focus:ring-2 focus:ring-primary focus:outline-none ${
+ errors.title ? "border-red-500" : "border-zinc-300"
+ }`}
+ placeholder="Contoh: Koleksi kaos Lebaran 2027"
+ />
+ {errors.title && <p className="text-xs text-red-600 mt-1">{errors.title}</p>}
+ </div>
+
+ <div>
+ <label htmlFor="custom-desc" className="block text-sm font-medium text-zinc-700 mb-1">
+ Deskripsi Kebutuhan
+ </label>
+ <textarea
+ id="custom-desc"
+ value={customDesc}
+ onChange={(e) => {
+ setCustomDesc(e.target.value);
+ clearError("description");
+ }}
+ aria-invalid={Boolean(errors.description)}
+ rows={5}
+ maxLength={2000}
+ className={`w-full px-3 py-2 border rounded-lg bg-white text-zinc-900 focus:ring-2 focus:ring-primary focus:outline-none ${
+ errors.description ? "border-red-500" : "border-zinc-300"
+ }`}
+ placeholder="Jelaskan produk, konsep, suasana, lokasi, dan hasil yang Anda inginkan..."
+ />
+ {errors.description && (
+ <p className="text-xs text-red-600 mt-1">{errors.description}</p>
+ )}
+ </div>
+
+ <ReferencePicker
+ images={refImages}
+ setImages={(u) => {
+ setRefImages(u);
+ clearError("references");
+ }}
+ links={refLinks}
+ setLinks={(u) => {
+ setRefLinks(u);
+ clearError("references");
+ }}
+ error={errors.references}
+ />
+ {errors.references && <span data-field-error className="sr-only" />}
+
+ <PackagePicker
+ packages={packages}
+ settings={pkgSettings}
+ value={pkgSel}
+ onChange={(next) => {
+ setPkgSel(next);
+ clearError("package");
+ }}
+ />
+ {errors.package && (
+ <p data-field-error className="text-xs text-red-600">{errors.package}</p>
+ )}
+
+ <ModelPicker value={model} onChange={setModel} />
+ </div>
+ )}
+
  <div className="grid md:grid-cols-2 gap-5">
  <div>
  <label className="block text-sm font-medium text-zinc-700 mb-1">
@@ -340,7 +550,7 @@ export default function RequestPage() {
  className="text-sm leading-relaxed text-zinc-600"
  >
  Saya menyetujui pengolahan data pribadi sesuai kebijakan privasi
- Article.
+ Article. Nama, email, WhatsApp, dan catatan Anda disimpan terenkripsi.
  </label>
  </div>
  {errors.consent && (
@@ -362,7 +572,7 @@ export default function RequestPage() {
  <div className="pt-4">
  <button
  type="submit"
- disabled={submitting}
+ disabled={submitting || refImages.some((i) => i.status === "uploading")}
  className="w-full py-3 bg-primary text-white rounded-lg font-medium hover:bg-primary/90 disabled:opacity-70 transition-colors flex items-center justify-center gap-2"
  >
  {submitting ? (
@@ -380,8 +590,9 @@ export default function RequestPage() {
  </div>
 
  <div className="mt-6 text-xs text-zinc-500 text-center border-t border-zinc-100 pt-4">
- Keranjang Anda saat ini berisi {cart.length} item. Harga bersifat
- estimasi hingga disepakati dengan admin.
+ {mode === "template"
+ ? `Keranjang Anda saat ini berisi ${cart.length} item. Harga bersifat estimasi hingga disepakati dengan admin.`
+ : "Harga bersifat estimasi hingga disepakati dengan admin."}
  </div>
  </form>
  </div>
