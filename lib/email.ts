@@ -28,6 +28,47 @@ function logFallback(recipients: string[], subject: string, text?: string) {
   console.log(`[EMAIL FALLBACK] To: ${recipients.join(", ")}\nSubject: ${subject}\nText: ${text || ""}`);
 }
 
+/**
+ * Terjemahkan penolakan Resend menjadi pesan yang bisa ditindaklanjuti admin.
+ * Bentuk galat Resend: { statusCode, name, message }.
+ */
+export function describeResendError(status: number, rawBody: string, ctx: { from?: string } = {}): string {
+  let name = "";
+  let message = "";
+  try {
+    const json = JSON.parse(rawBody);
+    name = String(json?.name ?? "");
+    message = String(json?.message ?? "");
+  } catch {
+    // isi bukan JSON
+  }
+
+  if (name === "restricted_api_key") {
+    return (
+      "API key ini hanya punya akses kirim (Sending access), jadi daftar domain tidak bisa dibaca. " +
+      "Pengiriman email tetap bisa dipakai: coba tombol Kirim uji. Untuk melihat domain di sini, buat key dengan Full access."
+    );
+  }
+  if (name === "invalid_api_key" || name === "missing_api_key" || (status === 401 && /invalid/i.test(message))) {
+    return "API key tidak valid. Salin ulang dari resend.com/api-keys (diawali re_), tempel, lalu simpan.";
+  }
+  if (/domain is not verified/i.test(message)) {
+    const domain = ctx.from?.match(/@([^>\s]+)>?\s*$/)?.[1];
+    return (
+      `Domain pengirim${domain ? ` (${domain})` : ""} belum terverifikasi di Resend. ` +
+      "Verifikasi di resend.com/domains, lalu isi Alamat pengirim dengan alamat dari domain tersebut."
+    );
+  }
+  if (/only send testing emails to your own email/i.test(message)) {
+    return (
+      "Akun Resend masih mode uji: email hanya bisa dikirim ke alamat pemilik akun sampai sebuah domain diverifikasi " +
+      "di resend.com/domains. Setelah itu pakai Alamat pengirim dari domain tersebut."
+    );
+  }
+  if (status === 429) return "Resend membatasi laju pengiriman. Coba lagi sebentar lagi.";
+  return `Resend menolak (${status})${message ? `: ${message}` : ""}`;
+}
+
 export type DeliverResult =
   | { ok: true; provider: "resend" | "fallback" }
   | { ok: false; provider: "resend"; error: string };
@@ -79,14 +120,7 @@ export async function deliverEmail({
     if (!response.ok) {
       const body = await response.text();
       console.error("Resend error:", response.status, body);
-      let message = `Resend menolak (${response.status})`;
-      try {
-        const detail = JSON.parse(body)?.message;
-        if (typeof detail === "string") message += `: ${detail}`;
-      } catch {
-        // isi bukan JSON
-      }
-      return { ok: false, provider: "resend", error: message };
+      return { ok: false, provider: "resend", error: describeResendError(response.status, body, { from }) };
     }
     return { ok: true, provider: "resend" };
   } catch (err) {

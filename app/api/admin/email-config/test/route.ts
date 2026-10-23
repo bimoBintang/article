@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { isAdmin } from "@/lib/auth-server";
-import { deliverEmail, resendBase } from "@/lib/email";
+import { deliverEmail, describeResendError, resendBase } from "@/lib/email";
 import { getEmailConfig } from "@/lib/email-settings";
 import { sampleEmail } from "@/lib/email-templates";
 
@@ -59,7 +59,7 @@ export async function POST(req: Request) {
       }
       if (!res.ok) {
         return NextResponse.json(
-          { error: res.status === 401 || res.status === 403 ? "API key ditolak Resend" : `Resend menolak (${res.status})` },
+          { error: describeResendError(res.status, await res.text().catch(() => "")) },
           { status: 502 }
         );
       }

@@ -94,6 +94,10 @@ export default function AdminEmailPage() {
       .catch((e: Error) => setLoadError(e.message));
   }, []);
 
+  // Alamat dari domain contoh/lokal pasti ditolak Resend (domain harus terverifikasi)
+  const fromDomain = form?.fromAddress.split("@")[1]?.toLowerCase() ?? "";
+  const placeholderFrom = /(^|\.)(local|localhost|test|invalid|example|example\.com)$/.test(fromDomain);
+
   const set = <K extends keyof Form>(key: K, value: Form[K]) =>
     setForm((f) => (f ? { ...f, [key]: value } : f));
 
@@ -322,7 +326,15 @@ export default function AdminEmailPage() {
                   <Field label="Nama pengirim" htmlFor="fromName">
                     <input id="fromName" value={form.fromName} onChange={(e) => set("fromName", e.target.value)} placeholder="Article" className={INPUT} />
                   </Field>
-                  <Field label="Alamat pengirim" htmlFor="fromAddress" hint="Harus memakai domain yang terverifikasi di Resend.">
+                  <Field
+                    label="Alamat pengirim"
+                    htmlFor="fromAddress"
+                    hint={
+                      placeholderFrom
+                        ? `Domain ${fromDomain} adalah contoh dan akan ditolak Resend. Pakai alamat dari domain yang sudah terverifikasi di resend.com/domains.`
+                        : "Harus memakai domain yang terverifikasi di Resend."
+                    }
+                  >
                     <input id="fromAddress" type="email" value={form.fromAddress} onChange={(e) => set("fromAddress", e.target.value)} placeholder="noreply@domain.com" className={INPUT} />
                   </Field>
                 </div>
