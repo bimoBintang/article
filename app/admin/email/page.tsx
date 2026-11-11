@@ -98,6 +98,20 @@ export default function AdminEmailPage() {
   const fromDomain = form?.fromAddress.split("@")[1]?.toLowerCase() ?? "";
   const placeholderFrom = /(^|\.)(local|localhost|test|invalid|example|example\.com)$/.test(fromDomain);
 
+  // Isian yang belum disimpan tidak dipakai mengirim email asli; beri tahu supaya tidak terlewat
+  const unsaved =
+    !!form &&
+    !!config &&
+    (form.apiKey !== "" ||
+      form.clearApiKey ||
+      form.fromName !== config.fromName ||
+      form.fromAddress !== config.fromAddress ||
+      form.replyTo !== config.replyTo ||
+      form.adminRecipients !== config.adminRecipients.join(", ") ||
+      form.brandName !== config.brand.name ||
+      form.accent !== config.brand.accent ||
+      form.footerNote !== config.brand.footerNote);
+
   const set = <K extends keyof Form>(key: K, value: Form[K]) =>
     setForm((f) => (f ? { ...f, [key]: value } : f));
 
@@ -146,7 +160,19 @@ export default function AdminEmailPage() {
       const res = await fetch("/api/admin/email-config/test", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(action === "send" ? { action, to: testTo.trim() } : { action }),
+        // Uji memakai isian di formulir (belum perlu disimpan); kolom kosong berarti memakai yang tersimpan
+        body: JSON.stringify(
+          action === "send"
+            ? {
+                action,
+                to: testTo.trim(),
+                apiKey: form?.apiKey.trim() || undefined,
+                fromName: form?.fromName,
+                fromAddress: form?.fromAddress,
+                replyTo: form?.replyTo,
+              }
+            : { action, apiKey: form?.apiKey.trim() || undefined }
+        ),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Uji gagal");
@@ -259,7 +285,8 @@ export default function AdminEmailPage() {
               <div className="mt-5 border-t border-zinc-100 pt-5 dark:border-zinc-800">
                 <p className="text-sm font-medium text-foreground">Uji koneksi</p>
                 <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-                  Simpan perubahan lebih dulu; uji memakai konfigurasi yang tersimpan.
+                  Uji memakai isian di formulir ini (key yang diketik dan pengirim), tanpa menyimpannya. Klik Simpan
+                  konfigurasi agar dipakai untuk mengirim email sungguhan.
                 </p>
                 <div className="mt-3 flex flex-col gap-2 sm:flex-row">
                   <input
@@ -382,6 +409,11 @@ export default function AdminEmailPage() {
               <Save className="h-4 w-4" />
               {saving ? "Menyimpan…" : "Simpan konfigurasi"}
             </button>
+            {unsaved && (
+              <p className="text-sm text-amber-600 dark:text-amber-400" role="status" data-unsaved>
+                Ada perubahan yang belum disimpan. Email asli baru memakai isian ini setelah Anda klik Simpan konfigurasi.
+              </p>
+            )}
           </div>
 
           {/* Kanan: pratinjau */}

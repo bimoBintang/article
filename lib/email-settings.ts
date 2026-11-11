@@ -67,7 +67,7 @@ export function parseRecipients(value: string | null | undefined): string[] {
 }
 
 /** Nama pengirim tidak boleh memuat karakter yang merusak header From. */
-function cleanName(value: string): string {
+export function cleanName(value: string): string {
   return value.replace(/[<>"\r\n,;]/g, "").trim();
 }
 
@@ -76,7 +76,9 @@ export async function getEmailConfig(): Promise<EmailConfig> {
   const text = (key: TextKey) => (map.get(key) ?? "").trim();
 
   const dbKey = decryptSecret(map.get(KEY_API));
-  const envKey = process.env.RESEND_API_KEY?.trim() || null;
+  const rawEnvKey = process.env.RESEND_API_KEY?.trim() || null;
+  // Nilai contoh dari .env.example dianggap belum diisi (jangan dipakai memanggil Resend)
+  const envKey = rawEnvKey && !/your[_-]?resend|re_your/i.test(rawEnvKey) ? rawEnvKey : null;
 
   const recipients = parseRecipients(text("email_admin_recipients"));
   const envAdmin = parseRecipients(process.env.ADMIN_EMAIL);

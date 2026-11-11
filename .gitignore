@@ -45,3 +45,6 @@ Screenshot *.png
 
 # konfigurasi lokal alat bantu (berisi API key)
 opencode.json
+
+# laporan PKL (dokumen pribadi, tidak di-commit)
+laporan-pkl/

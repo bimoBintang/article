@@ -1,4 +1,4 @@
-import { getEmailConfig } from "./email-settings";
+import { cleanName, getEmailConfig } from "./email-settings";
 
 // Template email dipindah ke email-templates.ts (murni, dipakai juga untuk
 // pratinjau di admin). Nama lama tetap diekspor dari sini.
@@ -77,18 +77,29 @@ export type DeliverResult =
  * Kirim lewat Resend dan laporkan hasilnya apa adanya (dipakai email uji di
  * halaman admin). Tanpa API key, email hanya dicatat di log server.
  */
-export async function deliverEmail({
-  to,
-  subject,
-  html,
-  text,
-}: {
-  to: string | string[];
-  subject: string;
-  html: string;
-  text?: string;
-}): Promise<DeliverResult> {
-  const config = await getEmailConfig();
+export async function deliverEmail(
+  {
+    to,
+    subject,
+    html,
+    text,
+  }: {
+    to: string | string[];
+    subject: string;
+    html: string;
+    text?: string;
+  },
+  /** Menimpa konfigurasi tersimpan; dipakai uji kirim dari halaman admin sebelum isian disimpan. */
+  override?: { apiKey?: string; fromName?: string; fromAddress?: string; replyTo?: string }
+): Promise<DeliverResult> {
+  const saved = await getEmailConfig();
+  const config = {
+    ...saved,
+    apiKey: override?.apiKey || saved.apiKey,
+    fromName: override?.fromName !== undefined ? cleanName(override.fromName) : saved.fromName,
+    fromAddress: override?.fromAddress || saved.fromAddress,
+    replyTo: override?.replyTo !== undefined ? override.replyTo : saved.replyTo,
+  };
   const recipients = Array.isArray(to) ? to : [to];
 
   if (!config.apiKey) {
